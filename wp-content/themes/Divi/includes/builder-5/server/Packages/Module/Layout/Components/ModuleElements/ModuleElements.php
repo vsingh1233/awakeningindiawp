@@ -746,9 +746,27 @@ class ModuleElements {
 
 			// Properly merge attributes by checking for collisions and merging values appropriately.
 			foreach ( $custom_attributes as $custom_attr_name => $custom_value ) {
-				if ( isset( $attributes_data[ $custom_attr_name ] ) && is_scalar( $attributes_data[ $custom_attr_name ] ) && is_scalar( $custom_value ) ) {
+				if ( ! isset( $attributes_data[ $custom_attr_name ] ) ) {
+					$attributes_data[ $custom_attr_name ] = $custom_value;
+					continue;
+				}
+
+				$existing_value = $attributes_data[ $custom_attr_name ];
+
+				if ( is_scalar( $existing_value ) && is_scalar( $custom_value ) ) {
 					// Attribute collision detected, merge values appropriately.
-					$attributes_data[ $custom_attr_name ] = AttributeUtils::merge_attribute_values( $custom_attr_name, $attributes_data[ $custom_attr_name ], $custom_value );
+					$attributes_data[ $custom_attr_name ] = AttributeUtils::merge_attribute_values( $custom_attr_name, $existing_value, $custom_value );
+				} elseif ( 'class' === $custom_attr_name && is_array( $existing_value ) && is_scalar( $custom_value ) ) {
+					// Merge scalar custom class into array-valued class (e.g. hiddenIfFalsy MultiView classes).
+					$custom_classes = array_filter( preg_split( '/\s+/', (string) $custom_value ), 'strlen' );
+
+					foreach ( $custom_classes as $custom_class ) {
+						if ( ! isset( $existing_value[ $custom_class ] ) && ! in_array( $custom_class, $existing_value, true ) ) {
+							$existing_value[ $custom_class ] = true;
+						}
+					}
+
+					$attributes_data[ $custom_attr_name ] = $existing_value;
 				} else {
 					// No collision, add normally.
 					$attributes_data[ $custom_attr_name ] = $custom_value;

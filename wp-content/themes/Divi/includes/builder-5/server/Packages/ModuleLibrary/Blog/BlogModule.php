@@ -1194,7 +1194,7 @@ class BlogModule implements DependencyInterface {
 
 			// Select image size directly based on layout mode.
 			// Grid mode: 400×250, Flex/Block mode: 1080×675.
-			$selected_image_size = $is_grid_mode ? 'et-pb-portfolio-image' : 'et-pb-post-main-image-fullwidth';
+			$selected_image_size = $is_grid_mode ? 'et-pb-post-main-image' : 'et-pb-post-main-image-fullwidth';
 
 			// Get image dimensions from WordPress image size.
 			$image_size_data = wp_get_attachment_image_src( get_post_thumbnail_id(), $selected_image_size );

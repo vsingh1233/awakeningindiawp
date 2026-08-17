@@ -2,7 +2,20 @@ import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 import OpenAI from "openai";
-import { getDefaultDbPath, openDb } from "./db.mjs";
+import { getDefaultDbPath, openDb, replaceCommentTags, updateCommentNormalization, updatePrBodySummary } from "./db.mjs";
+import {
+  buildEmbedDocument,
+  buildNormalizePrompt,
+  buildPrSummaryPrompt,
+  buildTagRecords,
+  coerceNormalization,
+  derivePathTags,
+  mergeTags,
+  normalizeSchema,
+  parseNormalizationJson,
+  prSummarySchema,
+  truncateText,
+} from "./feedback-context.mjs";
 
 const args = process.argv.slice(2);
 
@@ -54,67 +67,111 @@ const SKIP_COMMENT_REGEX = [
   /\bi'?ve addressed\b/i,
   /\bfix eslint errors?\b/i,
   /\bfix snapshot\b/i,
+  /^\s*(?:see\s+)?(?:\[[0-9a-f]{5,40}\]\([^)]+\)|https?:\/\/github\.com\/\S+)\s*$/i,
+  /^\s*@[\w-]+\s+i have small feedback\.?\s*$/i,
 ];
 
 const shouldSkipByRegex = (body) =>
   SKIP_COMMENT_REGEX.some((pattern) => pattern.test(body));
 
-const NANO_MAX_CHARS = 6000;
 const EMBED_MAX_CHARS = 6000;
 
-const truncateForNano = (body) => {
-  if (body.length <= NANO_MAX_CHARS) {
-    return body;
+const getResponseText = (response) =>
+  response.output_text ||
+  response.output?.map((item) => item.content?.[0]?.text ?? "").join("\n") ||
+  "";
+
+const parseJsonSafe = (text) => {
+  try {
+    return JSON.parse(String(text || "").trim());
+  } catch (error) {
+    const match = String(text || "").match(/\{[\s\S]*\}/);
+    if (null === match) {
+      return null;
+    }
+    try {
+      return JSON.parse(match[0]);
+    } catch (innerError) {
+      return null;
+    }
   }
-  return `${body.slice(0, NANO_MAX_CHARS)}\n\n[truncated]`;
 };
 
-const truncateForEmbedding = (body) => {
-  if (body.length <= EMBED_MAX_CHARS) {
-    return body;
-  }
-  return body.slice(0, EMBED_MAX_CHARS);
-};
+const createJsonSchemaFormat = (name, schema) => ({
+  type: "json_schema",
+  name,
+  strict: true,
+  schema,
+});
 
-const buildNanoPrompt = (commentBody) => [
-  {
-    role: "system",
-    content:
-      "You decide whether a PR comment is substantive feedback worth learning from.",
-  },
-  {
-    role: "user",
-    content: [
-      "Answer with JSON only: { keep: boolean, reason: string }.",
-      "",
-      "Guidance:",
-      "- keep=true for actionable review feedback, architectural concerns, or requests to change code behavior.",
-      "- keep=false for status updates, acknowledgements, test bot summaries, or replies that only describe what changed.",
-      "",
-      "Comment:",
-      truncateForNano(commentBody),
-    ].join("\n"),
-  },
-];
-
-const shouldKeepByNano = async ({ client, model, commentBody }) => {
+const summarizePr = async ({ client, model, title, body }) => {
   const response = await client.responses.create({
     model,
-    input: buildNanoPrompt(commentBody),
+    input: buildPrSummaryPrompt({ title, body }),
+    text: {
+      format: createJsonSchemaFormat("pr_summary", prSummarySchema),
+    },
   });
-  const outputText =
-    response.output_text ||
-    response.output?.map((item) => item.content?.[0]?.text ?? "").join("\n") ||
-    "";
+  const parsed = parseJsonSafe(getResponseText(response));
+  const summary = String(parsed?.summary || "").trim();
+  return summary;
+};
+
+const normalizeComment = async ({
+  client,
+  model,
+  body,
+  path: filePath,
+  hunk,
+  prTitle,
+  prSummary,
+}) => {
   try {
-    const parsed = JSON.parse(outputText.trim());
-    return {
-      keep: true === parsed.keep,
-      reason: parsed.reason || "",
-    };
+    const response = await client.responses.create({
+      model,
+      input: buildNormalizePrompt({
+        body,
+        path: filePath,
+        hunk,
+        prTitle,
+        prSummary,
+      }),
+      text: {
+        format: createJsonSchemaFormat("feedback_normalize", normalizeSchema),
+      },
+    });
+    const parsed = parseJsonSafe(getResponseText(response));
+    return coerceNormalization(parsed);
   } catch (error) {
-    return { keep: true, reason: "" };
+    return coerceNormalization({
+      keep: true,
+      reason: "nano_parse_fallback",
+      claim: "",
+      kind: "correctness",
+      signal: "medium",
+      tags: [],
+      reviewer_hint: "",
+    });
   }
+};
+
+const persistNormalization = (db, { commentId, normalized, pathTags }) => {
+  updateCommentNormalization(db, {
+    id: commentId,
+    normalized_claim: normalized.claim || null,
+    normalized_kind: normalized.kind || null,
+    normalized_signal: normalized.signal || null,
+    reviewer_hint: normalized.reviewer_hint || null,
+    normalized_json: JSON.stringify(normalized),
+  });
+  replaceCommentTags(db, {
+    commentId,
+    tags: buildTagRecords({
+      pathTags,
+      nanoTags: normalized.tags,
+      kind: normalized.kind,
+    }),
+  });
 };
 
 const fetchComments = ({
@@ -169,11 +226,17 @@ const fetchComments = ({
     SELECT
       comments.id,
       comments.body,
+      comments.path,
+      comments.diff_hunk,
+      comments.normalized_json,
       comments.created_at as comment_created_at,
       cf.status as filter_status,
       cf.reason as filter_reason,
+      prs.id as pr_id,
       prs.number as pr_number,
       prs.title as pr_title,
+      prs.body as pr_body,
+      prs.body_summary as pr_body_summary,
       prs.url as pr_url
     FROM comments
     INNER JOIN prs ON prs.id = comments.pr_id
@@ -260,6 +323,7 @@ const main = async () => {
   const dimensions =
     null == dimensionsValue ? null : Number(dimensionsValue);
   const onlyNew = false === hasArg("--all");
+  const forceRenormalize = false === onlyNew;
   const limitValue = getArgValue("--limit");
   const limit = null == limitValue ? null : Number(limitValue);
   const progressEveryValue = getArgValue("--progress-every");
@@ -295,6 +359,7 @@ const main = async () => {
   console.log(`db: ${dbContext.dbPath ?? getDefaultDbPath(repoRoot)}`);
   console.log(`model: ${model}`);
   console.log(`nano: ${useNanoFilter ? nanoModel : "disabled"}`);
+  console.log(`mode: ${true === onlyNew ? "new-only" : "re-embed --all"}`);
 
   const rows = fetchComments({
     db,
@@ -309,13 +374,46 @@ const main = async () => {
   console.log(`comments: ${rows.length}`);
 
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const prSummaryCache = new Map();
   let skippedByRegex = 0;
   let skippedByNano = 0;
   let skippedByLength = 0;
   let skippedByFilter = 0;
   let keptByFilter = 0;
+  let normalized = 0;
+  let reusedNormalization = 0;
+  let summarizedPrs = 0;
   let embedded = 0;
   let processed = 0;
+
+  const resolvePrSummary = async (row) => {
+    if (true === prSummaryCache.has(row.pr_id)) {
+      return prSummaryCache.get(row.pr_id);
+    }
+    if (row.pr_body_summary && false === forceRenormalize) {
+      prSummaryCache.set(row.pr_id, row.pr_body_summary);
+      return row.pr_body_summary;
+    }
+    const body = String(row.pr_body || "").trim();
+    if (body.length < 40) {
+      const fallback = String(row.pr_title || "").trim();
+      prSummaryCache.set(row.pr_id, fallback);
+      return fallback;
+    }
+    const summary = await summarizePr({
+      client,
+      model: nanoModel,
+      title: row.pr_title,
+      body,
+    });
+    const resolved = summary || String(row.pr_title || "").trim();
+    if (summary) {
+      updatePrBodySummary(db, { prId: row.pr_id, bodySummary: summary });
+      summarizedPrs += 1;
+    }
+    prSummaryCache.set(row.pr_id, resolved);
+    return resolved;
+  };
 
   for (const row of rows) {
     processed += 1;
@@ -337,52 +435,114 @@ const main = async () => {
       });
       continue;
     }
-    if ("kept" !== row.filter_status) {
-      if (true === shouldSkipByRegex(body)) {
-        skippedByRegex += 1;
+    if (true === shouldSkipByRegex(body)) {
+      skippedByRegex += 1;
+      upsertCommentFilter(db, {
+        commentId: row.id,
+        status: "skipped",
+        reason: "regex",
+        model: useNanoFilter ? nanoModel : null,
+      });
+      continue;
+    }
+
+    const pathTags = derivePathTags(row.path);
+    let normalization = null;
+    if (true === useNanoFilter) {
+      const cached = false === forceRenormalize
+        ? parseNormalizationJson(row.normalized_json)
+        : null;
+      if (cached) {
+        normalization = cached;
+        reusedNormalization += 1;
+      } else {
+        const prSummary = await resolvePrSummary(row);
+        normalization = await normalizeComment({
+          client,
+          model: nanoModel,
+          body,
+          path: row.path,
+          hunk: row.diff_hunk,
+          prTitle: row.pr_title,
+          prSummary,
+        });
+        persistNormalization(db, {
+          commentId: row.id,
+          normalized: normalization,
+          pathTags,
+        });
+        normalized += 1;
+      }
+      if (false === normalization.keep) {
+        skippedByNano += 1;
         upsertCommentFilter(db, {
           commentId: row.id,
           status: "skipped",
-          reason: "regex",
-          model: useNanoFilter ? nanoModel : null,
+          reason: normalization.reason || "nano",
+          model: nanoModel,
         });
         continue;
       }
-      if (true === useNanoFilter) {
-        const keepResult = await shouldKeepByNano({
-          client,
-          model: nanoModel,
-          commentBody: body,
-        });
-        if (false === keepResult.keep) {
-          skippedByNano += 1;
-          upsertCommentFilter(db, {
-            commentId: row.id,
-            status: "skipped",
-            reason: keepResult.reason || "nano",
-            model: nanoModel,
-          });
-          continue;
-        }
-        upsertCommentFilter(db, {
+      upsertCommentFilter(db, {
+        commentId: row.id,
+        status: "kept",
+        reason: normalization.reason || null,
+        model: nanoModel,
+      });
+      if (cached) {
+        persistNormalization(db, {
           commentId: row.id,
-          status: "kept",
-          reason: keepResult.reason || null,
-          model: nanoModel,
-        });
-      } else {
-        upsertCommentFilter(db, {
-          commentId: row.id,
-          status: "kept",
-          reason: null,
-          model: null,
+          normalized: normalization,
+          pathTags,
         });
       }
+    } else {
+      normalization = {
+        keep: true,
+        reason: "",
+        claim: "",
+        kind: "",
+        signal: "",
+        tags: [],
+        reviewer_hint: "",
+      };
+      upsertCommentFilter(db, {
+        commentId: row.id,
+        status: "kept",
+        reason: null,
+        model: null,
+      });
+      replaceCommentTags(db, {
+        commentId: row.id,
+        tags: buildTagRecords({
+          pathTags,
+          nanoTags: [],
+          kind: null,
+        }),
+      });
     }
+
+    const tags = mergeTags({
+      pathTags,
+      nanoTags: normalization.tags,
+      kind: normalization.kind,
+    });
+    const embedInput = truncateText(
+      buildEmbedDocument({
+        claim: normalization.claim,
+        kind: normalization.kind,
+        signal: normalization.signal,
+        tags,
+        path: row.path,
+        hunk: row.diff_hunk,
+        body,
+      }),
+      EMBED_MAX_CHARS
+    );
 
     const embeddingResponse = await client.embeddings.create({
       model,
-      input: truncateForEmbedding(body),
+      input: embedInput,
       encoding_format: "float",
       ...(dimensions ? { dimensions } : {}),
     });
@@ -416,6 +576,9 @@ const main = async () => {
         dimensions: dimensions ?? "default",
         processed,
         embedded,
+        normalized,
+        reused_normalization: reusedNormalization,
+        summarized_prs: summarizedPrs,
         skipped_by_regex: skippedByRegex,
         skipped_by_nano: skippedByNano,
         skipped_by_length: skippedByLength,

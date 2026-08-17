@@ -1071,7 +1071,12 @@ class MenuModule implements DependencyInterface {
 			]
 		);
 
-		$src               = $attr_value['src'] ?? '';
+		$src = $attr_value['src'] ?? '';
+
+		if ( ! is_string( $src ) ) {
+			$src = '';
+		}
+
 		$has_svg_extension = ! empty( $src ) && ImageUtils::is_file_extension( $src, 'svg' );
 
 		if ( $has_svg_extension ) {

@@ -71,6 +71,34 @@ class DynamicAssetsUtils {
 	private static $_local_canvas_posts_by_owner_set_cache = [];
 
 	/**
+	 * Memoized Dynamic Assets front-end request state.
+	 *
+	 * @since ??
+	 * @var bool|null
+	 */
+	private static $_is_dynamic_front_end_request = null;
+
+	/**
+	 * Memoized Dynamic Assets generation gate state.
+	 *
+	 * Stores the final filtered decision for the current request so hot paths
+	 * such as render_block_data / pre_do_shortcode_tag callbacks do not re-run
+	 * apply_filters() on every block or shortcode.
+	 *
+	 * @since ??
+	 * @var bool|null
+	 */
+	private static $_should_generate_dynamic_assets = null;
+
+	/**
+	 * Memoized Dynamic Assets usage gate state.
+	 *
+	 * @since ??
+	 * @var bool|null
+	 */
+	private static $_use_dynamic_assets = null;
+
+	/**
 	 * An associative array mapping Divi block module identifiers to their corresponding
 	 * WooCommerce shortcode module identifiers.
 	 *
@@ -107,6 +135,18 @@ class DynamicAssetsUtils {
 	];
 
 	/**
+	 * Memoized result for disable_js_on_demand().
+	 *
+	 * Cleared by DynamicAssetsUtils::reset() so filter/request-context changes
+	 * can be re-evaluated in the same process (e.g. PHPUnit).
+	 *
+	 * @since ??
+	 *
+	 * @var bool|null
+	 */
+	private static $_disable_js_on_demand = null;
+
+	/**
 	 * Check if JavaScript On Demand is enabled.
 	 *
 	 * @since ??
@@ -118,14 +158,14 @@ class DynamicAssetsUtils {
 		// phpcs:ignore ET.Comments.Todo.TodoFound -- Legacy TODO: May not be tracked in GitHub issues yet. Preserve for future tracking/removal.
 		// TODO feat(D5, Dynamic Assets) Remove this or deprecate the function during Divi 5 test.
 		// We are temporarily returning overriding this function to force Dynamic Assets to be on to improve performance.
-		if ( ! et_core_is_fb_enabled() && ! is_preview() && ! is_customize_preview() ) {
+		// Treat VB (including filtered VB test context) like FB so script enqueue can opt into disable_js_on_demand.
+		if ( ! Conditions::is_vb_enabled() && ! is_preview() && ! is_customize_preview() ) {
 			return false;
 		}
 
 		global $shortname;
-		static $et_disable_js_on_demand = null;
 
-		if ( null === $et_disable_js_on_demand ) {
+		if ( null === self::$_disable_js_on_demand ) {
 			if ( et_is_builder_plugin_active() ) {
 				$options              = get_option( 'et_pb_builder_options', [] );
 				$dynamic_js_libraries = $options['performance_main_dynamic_js_libraries'] ?? 'on';
@@ -138,9 +178,9 @@ class DynamicAssetsUtils {
 				// Disable when not applicable front-end request.
 				|| ! self::is_dynamic_front_end_request()
 			) {
-				$et_disable_js_on_demand = true;
+				self::$_disable_js_on_demand = true;
 			} else {
-				$et_disable_js_on_demand = false;
+				self::$_disable_js_on_demand = false;
 			}
 
 			/**
@@ -152,10 +192,13 @@ class DynamicAssetsUtils {
 			 *
 			 * @param bool $et_disable_js_on_demand
 			 */
-			$et_disable_js_on_demand = apply_filters( 'divi_frontend_assets_dynamic_assets_utils_disable_js_on_demand', (bool) $et_disable_js_on_demand );
+			self::$_disable_js_on_demand = apply_filters(
+				'divi_frontend_assets_dynamic_assets_utils_disable_js_on_demand',
+				(bool) self::$_disable_js_on_demand
+			);
 		}
 
-		return $et_disable_js_on_demand;
+		return self::$_disable_js_on_demand;
 	}
 
 	/**
@@ -679,6 +722,26 @@ class DynamicAssetsUtils {
 	}
 
 	/**
+	 * Enqueues D5 video lazy load script.
+	 *
+	 * This script handles lazy loading of videos that are below the fold
+	 * by converting data-src attributes to src when videos are about to enter the viewport.
+	 *
+	 * @since ??
+	 *
+	 * @return void
+	 */
+	public static function enqueue_video_lazy_load_script() {
+		wp_enqueue_script(
+			'divi-script-library-video-lazy-load',
+			ET_BUILDER_5_URI . '/visual-builder/build/script-library-video-lazy-load.js',
+			[], // No dependencies - uses native IntersectionObserver API.
+			ET_CORE_VERSION,
+			true
+		);
+	}
+
+	/**
 	 * Enqueues D5 signup script.
 	 *
 	 * @since ??
@@ -786,6 +849,52 @@ class DynamicAssetsUtils {
 			[ 'jquery' ],
 			ET_CORE_VERSION,
 			true
+		);
+	}
+
+	/**
+	 * Enqueues D5 post filter item script.
+	 *
+	 * @since ??
+	 *
+	 * @return void
+	 */
+	public static function enqueue_post_filter_item_script() {
+		wp_enqueue_script(
+			'divi-module-library-script-post-filter-item',
+			ET_BUILDER_5_URI . '/visual-builder/build/module-library-script-post-filter-item.js',
+			[],
+			ET_CORE_VERSION,
+			true
+		);
+
+		wp_add_inline_script(
+			'divi-module-library-script-post-filter-item',
+			'window.diviModulePostFilterItemRangeInit&&window.diviModulePostFilterItemRangeInit();window.diviModulePostFilterItemMultipleOrderInit&&window.diviModulePostFilterItemMultipleOrderInit();',
+			'after'
+		);
+	}
+
+	/**
+	 * Enqueues D5 post filter script.
+	 *
+	 * @since ??
+	 *
+	 * @return void
+	 */
+	public static function enqueue_post_filter_script() {
+		wp_enqueue_script(
+			'divi-module-library-script-post-filter',
+			ET_BUILDER_5_URI . '/visual-builder/build/module-library-script-post-filter.js',
+			[ 'divi-module-library-script-post-filter-item' ],
+			ET_CORE_VERSION,
+			true
+		);
+
+		wp_add_inline_script(
+			'divi-module-library-script-post-filter',
+			'window.diviModulePostFilterAutoInit&&window.diviModulePostFilterAutoInit();window.diviModulePostFilterSubmitInit&&window.diviModulePostFilterSubmitInit();window.diviModulePostFilterResetInit&&window.diviModulePostFilterResetInit();',
+			'after'
 		);
 	}
 
@@ -1016,7 +1125,9 @@ class DynamicAssetsUtils {
 			esc_url(
 				add_query_arg(
 					[
-						'key' => et_pb_get_google_api_key(),
+						'key'       => et_pb_get_google_api_key(),
+						'libraries' => 'marker',
+						'loading'   => 'async',
 					],
 					is_ssl() ? 'https://maps.googleapis.com/maps/api/js' : 'http://maps.googleapis.com/maps/api/js'
 				)
@@ -1312,6 +1423,12 @@ class DynamicAssetsUtils {
 					"{$prefix}/css/buttons{$suffix}.css",
 				],
 			],
+			'divi/payment-button'                       => [
+				'css' => [
+					"{$prefix}/css/button{$suffix}.css",
+					"{$prefix}/css/buttons{$suffix}.css",
+				],
+			],
 			'divi/group-carousel'                       => [
 				'css' => [
 					"{$prefix}/css/group_carousel{$suffix}.css",
@@ -1319,6 +1436,9 @@ class DynamicAssetsUtils {
 			],
 			'divi/circle-counter'                       => [
 				'css' => "{$prefix}/css/circle_counter{$suffix}.css",
+			],
+			'divi/charts'                               => [
+				'css' => "{$prefix}/css/charts{$suffix}.css",
 			],
 			'divi/code'                                 => [
 				'css' => "{$prefix}/css/code{$suffix}.css",
@@ -1345,6 +1465,9 @@ class DynamicAssetsUtils {
 					"{$prefix}/css/contact_form_7{$suffix}.css",
 					"{$prefix}/css/buttons{$suffix}.css",
 				],
+			],
+			'divi/gravity-forms'                        => [
+				'css' => "{$prefix}/css/gravity_forms{$suffix}.css",
 			],
 			'divi/countdown-timer'                      => [
 				'css' => "{$prefix}/css/countdown_timer{$suffix}.css",
@@ -1463,6 +1586,9 @@ class DynamicAssetsUtils {
 					"{$prefix}/css/overlay{$suffix}.css",
 				],
 			],
+			'divi/imagely-gallery'                      => [
+				'css' => "{$prefix}/css/imagely_gallery{$suffix}.css",
+			],
 			'divi/instagram-feed'                       => [
 				'css' => [
 					"{$prefix}/css/instagram_feed{$suffix}.css",
@@ -1508,6 +1634,15 @@ class DynamicAssetsUtils {
 				],
 			],
 			'divi/post-content'                         => [],
+			'divi/post-filter'                          => [
+				'css' => [
+					"{$prefix}/css/post_filter{$suffix}.css",
+					"{$prefix}/css/post_filter_item{$suffix}.css",
+				],
+			],
+			'divi/post-filter-item'                     => [
+				'css' => "{$prefix}/css/post_filter_item{$suffix}.css",
+			],
 			'divi/post-nav'                             => [
 				'css' => "{$prefix}/css/post_nav{$suffix}.css",
 			],
@@ -2248,6 +2383,7 @@ class DynamicAssetsUtils {
 		$font_icon_modules_used_in_migrations = [
 			'button'  => [
 				'divi/button',
+				'divi/payment-button',
 				'divi/comments',
 				'divi/contact-form',
 				'divi/cta',
@@ -3510,7 +3646,7 @@ class DynamicAssetsUtils {
 			return false;
 		}
 
-		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- REQUEST_URI used only for pattern matching, not output.
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, ET.Sniffs.ValidatedSanitizedInput.InputNotSanitized -- REQUEST_URI used only for pattern matching, not output.
 		$request_uri = isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : '';
 
 		if ( empty( $request_uri ) ) {
@@ -3530,10 +3666,8 @@ class DynamicAssetsUtils {
 	 * @return bool
 	 */
 	public static function is_dynamic_front_end_request(): bool {
-		static $is_dynamic_front_end_request = null;
-
-		if ( null === $is_dynamic_front_end_request ) {
-			$is_dynamic_front_end_request = false;
+		if ( null === self::$_is_dynamic_front_end_request ) {
+			self::$_is_dynamic_front_end_request = false;
 
 			// WordPress auto-update scrape requests are health checks and should not generate cache files.
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only request inspection for cache-safety behavior.
@@ -3565,11 +3699,11 @@ class DynamicAssetsUtils {
 				// Disable on paginated index pages when blog style mode is enabled and when using the Divi Builder plugin.
 				&& ! ( is_paged() && ( 'on' === et_get_option( 'divi_blog_style', 'off' ) || et_is_builder_plugin_active() ) )
 			) {
-				$is_dynamic_front_end_request = true;
+				self::$_is_dynamic_front_end_request = true;
 			}
 		}
 
-		return $is_dynamic_front_end_request;
+		return self::$_is_dynamic_front_end_request;
 	}
 
 	/**
@@ -3705,14 +3839,17 @@ class DynamicAssetsUtils {
 	 * Check if the current request should generate Dynamic Assets.
 	 * We only generate dynamic assets on the front end and when cache dir is writable.
 	 *
+	 * The filtered result is memoized for the request. Call DynamicAssetsUtils::reset()
+	 * before re-evaluating after filter or request-context changes.
+	 *
 	 * @since ??
 	 *
 	 * @return bool
 	 */
 	public static function should_generate_dynamic_assets(): bool {
-		static $should_generate_assets = null;
+		if ( null === self::$_should_generate_dynamic_assets ) {
+			$should_generate_assets = false;
 
-		if ( null === $should_generate_assets ) {
 			if ( // Cache directory must be writable.
 				et_core_cache_dir()->can_write
 				// Request must be an applicable front-end request.
@@ -3720,18 +3857,58 @@ class DynamicAssetsUtils {
 			) {
 				$should_generate_assets = true;
 			}
+
+			/**
+			 * Filters whether to generate dynamic assets.
+			 *
+			 * This filter is the replacement of Divi 4 filter `et_should_generate_dynamic_assets`.
+			 *
+			 * @since ??
+			 *
+			 * @param bool $should_generate_assets
+			 */
+			self::$_should_generate_dynamic_assets = (bool) apply_filters(
+				'divi_frontend_assets_dynamic_assets_utils_should_generate_dynamic_assets',
+				$should_generate_assets
+			);
 		}
 
-		/**
-		 * Filters whether to generate dynamic assets.
-		 *
-		 * This filter is the replacement of Divi 4 filter `et_should_generate_dynamic_assets`.
-		 *
-		 * @since ??
-		 *
-		 * @param bool $should_generate_assets
-		 */
-		return apply_filters( 'divi_frontend_assets_dynamic_assets_utils_should_generate_dynamic_assets', (bool) $should_generate_assets );
+		return self::$_should_generate_dynamic_assets;
+	}
+
+	/**
+	 * Check if the dynamic assets detection pipeline should run on this request.
+	 *
+	 * When false, early content parsing, render-time logging, and late detection are skipped.
+	 * Generation and enqueue remain governed by should_generate_dynamic_assets() and use_dynamic_assets().
+	 *
+	 * @since ??
+	 *
+	 * @return bool
+	 */
+	public static function should_run_detection(): bool {
+		static $should_run_detection = null;
+
+		if ( null === $should_run_detection ) {
+			$should_run_detection = true;
+
+			/**
+			 * Filters whether to run the dynamic assets detection pipeline.
+			 *
+			 * Skips early content parsing, render_block_data / pre_do_shortcode_tag logging,
+			 * and late detection when false. Does not affect generation or enqueue.
+			 *
+			 * @since ??
+			 *
+			 * @param bool $should_run_detection Whether to run detection.
+			 */
+			$should_run_detection = apply_filters(
+				'divi_frontend_assets_dynamic_assets_utils_should_run_detection',
+				(bool) $should_run_detection
+			);
+		}
+
+		return $should_run_detection;
 	}
 
 	/**
@@ -3772,14 +3949,12 @@ class DynamicAssetsUtils {
 		 * apply_filters here needs to function correctly.
 		 */
 
-		static $use_dynamic_assets = null;
-
-		if ( null === $use_dynamic_assets ) {
+		if ( null === self::$_use_dynamic_assets ) {
 			/*
 			 * Removed the `{$shortname}_dynamic_css` or `et_pb_builder_options` option check to force Dynamic Assets
 			 * to be on to improve performance.
 			 */
-			$use_dynamic_assets = self::should_generate_dynamic_assets();
+			self::$_use_dynamic_assets = self::should_generate_dynamic_assets();
 
 			/**
 			 * Filters whether to use dynamic CSS.
@@ -3790,10 +3965,10 @@ class DynamicAssetsUtils {
 			 *
 			 * @param bool $use_dynamic_assets
 			 */
-			$use_dynamic_assets = apply_filters( 'divi_frontend_assets_dynamic_assets_utils_use_dynamic_assets', $use_dynamic_assets );
+			self::$_use_dynamic_assets = apply_filters( 'divi_frontend_assets_dynamic_assets_utils_use_dynamic_assets', self::$_use_dynamic_assets );
 		}
 
-		return $use_dynamic_assets;
+		return self::$_use_dynamic_assets;
 	}
 
 	/**
@@ -3849,6 +4024,22 @@ class DynamicAssetsUtils {
 		);
 	}
 
+	/**
+	 * Enqueues D5 charts script, used for charts modules.
+	 *
+	 * @since ??
+	 *
+	 * @return void
+	 */
+	public static function enqueue_charts_script() {
+		wp_enqueue_script(
+			'divi-module-library-script-charts',
+			ET_BUILDER_5_URI . '/visual-builder/build/module-library-script-charts.js',
+			[ 'jquery' ],
+			ET_CORE_VERSION,
+			true
+		);
+	}
 
 	/**
 	 * Check if a feature value is meaningful (non-empty).
@@ -3900,5 +4091,9 @@ class DynamicAssetsUtils {
 		self::$_canvas_data_static_cache              = [];
 		self::$_canvas_posts_static_cache             = [];
 		self::$_local_canvas_posts_by_owner_set_cache = [];
+		self::$_is_dynamic_front_end_request          = null;
+		self::$_should_generate_dynamic_assets        = null;
+		self::$_use_dynamic_assets                    = null;
+		self::$_disable_js_on_demand                  = null;
 	}
 }

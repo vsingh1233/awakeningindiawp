@@ -27,6 +27,7 @@ use ET\Builder\Packages\Module\Layout\Components\StyleCommon\CommonStyle;
 use ET\Builder\Packages\Module\Module;
 use ET\Builder\Packages\ModuleLibrary\ModuleRegistration;
 use ET\Builder\Packages\ModuleLibrary\Video\VideoHTMLController;
+use ET\Builder\Packages\ModuleLibrary\Video\VideoUtils;
 use ET\Builder\Packages\ModuleLibrary\VideoSlider\VideoSlideThumbnailController;
 use ET\Builder\Packages\StyleLibrary\Utils\StyleDeclarations;
 use ET_Builder_Post_Features;
@@ -528,7 +529,7 @@ class VideoSliderItemModule implements DependencyInterface {
 		$parent_attrs         = array_replace_recursive( $default_parent_attrs, $parent->attrs ?? [] );
 
 		// Adding orderIndex to the parent attributes.
-		$parent_attrs['orderIndex'] = $parent->orderIndex ?? 0;
+		$parent_attrs['orderIndex'] = $parent->orderIndex ?? 0; // @phpcs:ignore -- Snake case is valid in this case.
 
 		// Video Params.
 		$video_mp4_url       = $attrs['video']['innerContent']['desktop']['value']['src'] ?? '';
@@ -543,7 +544,11 @@ class VideoSliderItemModule implements DependencyInterface {
 					// Get Video Urls.
 					$video_mp4_url  = $value['src'] ?? '';
 					$video_webm_url = $value['webm'] ?? '';
-					return VideoSliderItemModule::get_video_html( $video_mp4_url, $video_webm_url );
+
+					$video_html = self::get_video_html( $video_mp4_url, $video_webm_url );
+
+					// Defer video loading if module is below the fold.
+					return VideoUtils::maybe_defer_video_loading( $video_html );
 				},
 			]
 		);
@@ -638,7 +643,7 @@ class VideoSliderItemModule implements DependencyInterface {
 				'stylesComponent'          => [ self::class, 'module_styles' ],
 				'parentAttrs'              => $parent_attrs,
 				'parentId'                 => $parent->id ?? '',
-				'parentName'               => $parent->blockName ?? '',
+				'parentName'               => $parent->blockName ?? '', // @phpcs:ignore -- Snake case is valid in this case.
 				'children'                 => $elements->style_components(
 					[
 						'attrName' => 'module',

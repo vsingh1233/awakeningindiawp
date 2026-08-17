@@ -110,9 +110,11 @@ class BlockParser extends \WP_Block_Parser {
 			'divi/blog'                        => $base_namespace . 'Blog\BlogModule',
 			'divi/blurb'                       => $base_namespace . 'Blurb\BlurbModule',
 			'divi/button'                      => $base_namespace . 'Button\ButtonModule',
+			'divi/payment-button'              => $base_namespace . 'PaymentButton\PaymentButtonModule',
 			'divi/canvas-portal'               => $base_namespace . 'CanvasPortal\CanvasPortalModule',
 			'divi/cta'                         => $base_namespace . 'CTA\CTAModule',
 			'divi/circle-counter'              => $base_namespace . 'CircleCounter\CircleCounterModule',
+			'divi/charts'                      => $base_namespace . 'Charts\ChartsModule',
 			'divi/code'                        => $base_namespace . 'Code\CodeModule',
 			'divi/column-inner'                => $base_namespace . 'ColumnInner\ColumnInnerModule',
 			'divi/column'                      => $base_namespace . 'Column\ColumnModule',
@@ -151,6 +153,8 @@ class BlockParser extends \WP_Block_Parser {
 			'divi/number-counter'              => $base_namespace . 'NumberCounter\NumberCounterModule',
 			'divi/portfolio'                   => $base_namespace . 'Portfolio\PortfolioModule',
 			'divi/post-content'                => $base_namespace . 'PostContent\PostContentModule',
+			'divi/post-filter'                 => $base_namespace . 'PostFilter\PostFilterModule',
+			'divi/post-filter-item'            => $base_namespace . 'PostFilterItem\PostFilterItemModule',
 			'divi/post-nav'                    => $base_namespace . 'PostNavigation\PostNavigationModule',
 			'divi/post-slider'                 => $base_namespace . 'PostSlider\PostSliderModule',
 			'divi/post-title'                  => $base_namespace . 'PostTitle\PostTitleModule',
@@ -185,6 +189,20 @@ class BlockParser extends \WP_Block_Parser {
 
 		if ( class_exists( '\WPCF7_ContactForm' ) ) {
 			$modules['divi/contact-form-7'] = $base_namespace . 'ContactForm7\ContactForm7Module';
+		}
+
+		if ( class_exists( '\GFForms' ) ) {
+			$modules['divi/gravity-forms'] = $base_namespace . 'GravityForms\GravityFormsModule';
+		}
+
+		/*
+		 * Imagely Gallery module (formerly NextGEN Gallery) — only register
+		 * when the plugin is active. We probe the legacy `C_NextGEN_Bootstrap`
+		 * class because the plugin still ships it under its original symbol
+		 * name even after rebranding to Imagely.
+		 */
+		if ( class_exists( 'C_NextGEN_Bootstrap' ) ) {
+			$modules['divi/imagely-gallery'] = $base_namespace . 'ImagelyGallery\ImagelyGalleryModule';
 		}
 
 		/*
@@ -944,13 +962,19 @@ class BlockParser extends \WP_Block_Parser {
 		// (visual builder on default layout / page) or `et_builder_render_layout` filter (theme builder / library layout).
 		// Because we want Dynamic Data `$variable` only being replaced by its actual value when it is being rendered
 		// not when it is being queried or retrieved programmatically.
-		if ( $is_doing_content_filter ) {
+		if ( $is_doing_content_filter && ! MigrationContext::is_active() ) {
 			// If the content contains loop enabled blocks, parse and duplicate the loop blocks.
 			// Skip loop processing when generating excerpts to prevent infinite recursion.
 			$has_loop_enabled_blocks = LoopUtils::has_any_loop_enabled_blocks( $this->document );
 			$is_generating_excerpt   = isset( $GLOBALS['divi_generating_excerpt'] ) && $GLOBALS['divi_generating_excerpt'];
 
 			if ( $has_loop_enabled_blocks ) {
+				// Skip loop duplication while a migration is active. Migration parses content
+				// (via `MigrationContext`) before `do_blocks()`, and duplicating loop blocks there
+				// bakes the current request's pagination state into the migrated markup. That
+				// migrated result is reused across requests, so paginated loops would always render
+				// the first page. Loop duplication must only happen at actual render time, where the
+				// per-request pagination query arg is read.
 				if ( ! $is_generating_excerpt ) {
 					$this->document = LoopUtils::parse_and_duplicate_loop_blocks( $this->document );
 				}

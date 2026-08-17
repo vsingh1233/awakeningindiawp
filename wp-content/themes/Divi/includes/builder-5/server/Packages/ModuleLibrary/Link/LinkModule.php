@@ -456,18 +456,60 @@ class LinkModule implements DependencyInterface {
 		// outside the anchor tag (as wrapper children) to maintain valid HTML structure.
 		$should_separate_children = $enable_when_children && $has_children;
 
-		// Prepare HTML attributes for the anchor tag.
-		$html_attrs = [];
-
-		// Add href attribute if URL is provided.
-		if ( ! empty( $link_url ) ) {
-			$html_attrs['href'] = esc_url( $link_url );
+		// Check if Element Type is set to "button" via Advanced > HTML > Element Type.
+		$html_attr          = $attrs['module']['advanced']['html'] ?? [];
+		$element_type_value = ModuleUtils::get_attr_subname_value(
+			[
+				'attr'         => $html_attr,
+				'breakpoint'   => 'desktop',
+				'state'        => 'value',
+				'mode'         => 'get',
+				'subname'      => 'elementType',
+				'defaultValue' => null,
+			]
+		);
+		$element_type       = null;
+		if ( is_string( $element_type_value ) && ! empty( $element_type_value ) ) {
+			$element_type = strtolower( trim( $element_type_value ) );
 		}
+		$is_button_element = 'button' === $element_type;
 
-		// Add target and rel attributes if link target is set to open in new tab.
-		if ( 'on' === $link_target ) {
-			$html_attrs['target'] = '_blank';
-			$html_attrs['rel']    = 'noopener noreferrer';
+		// Prepare HTML attributes. Default to anchor; switch to button + onclick when needed.
+		$html_attrs = [];
+		$tag        = 'a';
+
+		// If Element Type is "button", use button tag and add onclick handler instead of href.
+		if ( $is_button_element ) {
+			$tag = 'button';
+
+			// Add onclick handler for navigation.
+			// Note: HTMLUtility::render_attributes() will call esc_js() on the entire onclick value.
+			// Use esc_url() first to block dangerous protocols, then esc_js() for JS string context.
+			if ( ! empty( $link_url ) ) {
+				$validated_url = esc_url( $link_url );
+				if ( ! empty( $validated_url ) ) {
+					$escaped_url = esc_js( $validated_url );
+					if ( 'on' === $link_target ) {
+						$html_attrs['onclick'] = "window.open(\"{$escaped_url}\",\"_blank\",\"noopener,noreferrer\");return false;";
+					} else {
+						$html_attrs['onclick'] = "window.location.href=\"{$escaped_url}\";return false;";
+					}
+				}
+			}
+
+			// Add type="button" to prevent form submission.
+			$html_attrs['type'] = 'button';
+		} else {
+			// Add href attribute if URL is provided.
+			if ( ! empty( $link_url ) ) {
+				$html_attrs['href'] = esc_url( $link_url );
+			}
+
+			// Add target and rel attributes if link target is set to open in new tab.
+			if ( 'on' === $link_target ) {
+				$html_attrs['target'] = '_blank';
+				$html_attrs['rel']    = 'noopener noreferrer';
+			}
 		}
 
 		// Get and render icon if present.
@@ -545,7 +587,7 @@ class LinkModule implements DependencyInterface {
 				'elements'                  => $elements,
 				'id'                        => $block->parsed_block['id'],
 				'name'                      => $block->block_type->name,
-				'tag'                       => 'a',
+				'tag'                       => $tag,
 				'htmlAttrs'                 => $html_attrs,
 				'classnamesFunction'        => [ self::class, 'module_classnames' ],
 				'wrapperClassnamesFunction' => [ self::class, 'wrapper_classnames' ],
@@ -637,18 +679,35 @@ class LinkModule implements DependencyInterface {
 	/**
 	 * Display from layout style declaration for the Link module.
 	 *
-	 * Ensures the Link inner wrapper receives display from layout settings,
-	 * so layout direction/alignment rules can affect icon/text children.
+	 * Ensures the Link inner wrapper receives display and gap longhands from layout
+	 * settings. LayoutStyle only emits `--horizontal-gap` / `--vertical-gap` CSS
+	 * variables and does not emit `display` or `column-gap`/`row-gap`. This bridge
+	 * supplies `display` (so direction/alignment rules affect icon/text children)
+	 * and gap longhands that consume those variables on `.et_pb_link_inner` (a plain
+	 * flex host, not `.et_flex_module`).
+	 *
+	 * CRITICAL: Layout Style (display) is non-responsive, so always use the desktop
+	 * value to determine which CSS properties to output. Gap attrs remain responsive
+	 * via the current breakpoint `attrValue`.
+	 *
+	 * NOTE: Do not call `Layout::style_declaration` here — LayoutStyle already emits
+	 * the CSS variables; calling it again would duplicate them.
 	 *
 	 * @since ??
 	 *
 	 * @param array $params An array of arguments containing attrValue.
 	 *
-	 * @return string The CSS for display.
+	 * @return string The CSS for display and gap longhands.
 	 */
 	public static function display_from_layout_style_declaration( array $params ): string {
-		$layout_attr = $params['attrValue'] ?? [];
-		$display     = $layout_attr['display'] ?? null;
+		$layout_attr        = $params['attrValue'] ?? [];
+		$default_attr_value = $params['defaultAttrValue'] ?? [];
+		$attr               = $params['attr'] ?? [];
+		$desktop_value      = $attr['desktop']['value'] ?? [];
+
+		// Since Layout Style (display) is non-responsive, always use the desktop value
+		// to determine which CSS properties to output, regardless of current breakpoint.
+		$display = $desktop_value['display'] ?? $layout_attr['display'] ?? null;
 
 		// Resolve display from nested value shape if needed.
 		if ( empty( $display ) && isset( $layout_attr['value']['display'] ) ) {
@@ -656,8 +715,11 @@ class LinkModule implements DependencyInterface {
 		}
 
 		if ( empty( $display ) ) {
-			$display = 'flex';
+			$display = $default_attr_value['display'] ?? 'flex';
 		}
+
+		$column_gap = $layout_attr['columnGap'] ?? $default_attr_value['columnGap'] ?? '';
+		$row_gap    = $layout_attr['rowGap'] ?? $default_attr_value['rowGap'] ?? '';
 
 		$style_declarations = new StyleDeclarations(
 			[
@@ -666,6 +728,18 @@ class LinkModule implements DependencyInterface {
 		);
 
 		$style_declarations->add( 'display', $display );
+
+		// Gap longhands only apply for non-block layouts (flex/grid). Use CSS variables
+		// owned by LayoutStyle — never raw gap literals.
+		if ( 'block' !== $display ) {
+			if ( $column_gap ) {
+				$style_declarations->add( 'column-gap', 'var(--horizontal-gap)' );
+			}
+
+			if ( $row_gap ) {
+				$style_declarations->add( 'row-gap', 'var(--vertical-gap)' );
+			}
+		}
 
 		return $style_declarations->value();
 	}

@@ -442,11 +442,11 @@ class ListFontStyle {
 							? call_user_func( $selector_function, $params )
 							: ( $params['selector'] ?? $selector );
 
-						// Handle comma-separated selectors by splitting and appending ' li' to each.
+						// Handle comma-separated selectors by splitting and appending ' > li' to each.
 						$individual_selectors = array_map( 'trim', explode( ',', $base_selector ?? '' ) );
 						$combined_selectors   = array_map(
 							function ( $sel ) {
-								return $sel . ' li';
+								return $sel . ' > li';
 							},
 							$individual_selectors
 						);
@@ -483,11 +483,11 @@ class ListFontStyle {
 						? call_user_func( $selector_function, $params )
 						: ( $params['selector'] ?? $selector );
 
-					// Handle comma-separated selectors by splitting and appending ' li' to each.
+					// Handle comma-separated selectors by splitting and appending ' > li' to each.
 					$individual_selectors = array_map( 'trim', explode( ',', $base_selector ?? '' ) );
 					$combined_selectors   = array_map(
 						function ( $sel ) {
-							return $sel . ' li';
+							return $sel . ' > li';
 						},
 						$individual_selectors
 					);

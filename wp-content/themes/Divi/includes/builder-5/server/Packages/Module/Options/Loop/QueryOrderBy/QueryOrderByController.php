@@ -37,53 +37,61 @@ class QueryOrderByController extends RESTController {
 		$post_type  = $request->get_param( 'post_type' );
 		$taxonomy   = $request->get_param( 'post_taxonomies' ); // For direct taxonomy access.
 
-		// Normalize query type.
-		$query_type = self::_normalize_query_type( $query_type );
-
-		$order_by_options = [];
-
-		switch ( $query_type ) {
-			case 'post_type':
-				// Handle multiple post types.
-				if ( is_string( $post_type ) && strpos( $post_type, ',' ) !== false ) {
-					$post_types       = array_map( 'trim', explode( ',', $post_type ) );
-					$order_by_options = self::_get_multiple_post_types_order_by_options( $post_types );
-				} else {
-					$order_by_options = self::_get_post_type_order_by_options( $post_type );
-				}
-				break;
-
-			case 'post_taxonomies':
-				// Handle multiple taxonomies.
-				if ( is_string( $taxonomy ) && strpos( $taxonomy, ',' ) !== false ) {
-					$taxonomies       = array_map( 'trim', explode( ',', $taxonomy ) );
-					$order_by_options = self::_get_multiple_taxonomies_order_by_options( $post_type, $taxonomies );
-				} else {
-					// If no specific taxonomy is provided, use post type to get related taxonomies.
-					$order_by_options = self::_get_post_taxonomies_order_by_options( $post_type, $taxonomy );
-				}
-				break;
-
-			case 'user_roles':
-				// User roles doesn't need any parameters.
-				$order_by_options = self::_get_user_roles_order_by_options();
-				break;
-
-			case 'menus':
-				// Menus doesn't need any parameters.
-				$order_by_options = self::_get_menus_order_by_options();
-				break;
-
-			case 'current_page':
-				$order_by_options = self::_get_current_page_order_by_options();
-				break;
-
-			default:
-				return rest_ensure_response( self::response_error( 'Invalid query_type specified' ) );
-		}
+		$order_by_options = self::get_options(
+			is_string( $query_type ) ? $query_type : '',
+			is_string( $post_type ) ? $post_type : 'post',
+			is_string( $taxonomy ) ? $taxonomy : ''
+		);
 
 		return self::response_success( $order_by_options );
 	}
+
+	/**
+	 * Return ordering options for one loop query context.
+	 *
+	 * @since ??
+	 *
+	 * @param string $query_type Query type slug.
+	 * @param string $post_type  Post type slug.
+	 * @param string $taxonomy   Taxonomy slug for taxonomy loops.
+	 *
+	 * @return array<int, array{value: string, label: string}> Order-by options.
+	 */
+	public static function get_options( string $query_type = 'post_types', string $post_type = 'post', string $taxonomy = '' ): array {
+		$query_type = self::_normalize_query_type( $query_type );
+
+		switch ( $query_type ) {
+			case 'post_type':
+				if ( is_string( $post_type ) && strpos( $post_type, ',' ) !== false ) {
+					$post_types = array_map( 'trim', explode( ',', $post_type ) );
+
+					return self::_get_multiple_post_types_order_by_options( $post_types );
+				}
+
+				return self::_get_post_type_order_by_options( $post_type );
+
+			case 'post_taxonomies':
+				if ( is_string( $taxonomy ) && strpos( $taxonomy, ',' ) !== false ) {
+					$taxonomies = array_map( 'trim', explode( ',', $taxonomy ) );
+
+					return self::_get_multiple_taxonomies_order_by_options( $post_type, $taxonomies );
+				}
+
+				return self::_get_post_taxonomies_order_by_options( $post_type, $taxonomy );
+
+			case 'user_roles':
+				return self::_get_user_roles_order_by_options();
+
+			case 'menus':
+				return self::_get_menus_order_by_options();
+
+		case 'current_page':
+			return self::_get_current_page_order_by_options();
+
+		default:
+			return [];
+	}
+}
 
 	/**
 	 * Normalize query type parameter.

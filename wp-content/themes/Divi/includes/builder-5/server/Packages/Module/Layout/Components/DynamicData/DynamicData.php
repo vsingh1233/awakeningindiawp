@@ -106,6 +106,12 @@ class DynamicData {
 
 		$data_value = json_decode( $json_value, true );
 
+		if ( ! is_array( $data_value ) ) {
+			// Some serialized dynamic data values arrive with escaped Unicode quotes/backslashes.
+			// Unslashing makes the JSON readable before the second decode attempt.
+			$data_value = json_decode( wp_unslash( $json_value ), true );
+		}
+
 		return is_array( $data_value ) ? $data_value : [];
 	}
 
@@ -175,6 +181,11 @@ class DynamicData {
 	 * @return string The processed string with replaced Unicode escape double quotes.
 	 */
 	public static function construct_json_string( string $string_value ): string {
+		// Restore JSON-escaped quotes inside nested string values (e.g. upload sub-field JSON)
+		// before normalizing structural \u0022 sequences. Block serialization encodes inner \"
+		// as \u005c\u0022.
+		$string_value = str_replace( '\\u005c\\u0022', '\\"', $string_value );
+
 		$string_value = str_replace( '\\u0022:{', '":{', $string_value );
 		$string_value = str_replace( '\\u0022:[', '":[', $string_value );
 		$string_value = str_replace( '\\u0022:\\u0022', '":"', $string_value );

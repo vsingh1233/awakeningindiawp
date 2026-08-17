@@ -107,6 +107,64 @@ class CriticalCSS implements DependencyInterface {
 	protected $_above_the_fold_height;
 
 	/**
+	 * Running vertical offset within the current section, used only for lazy-load
+	 * fold detection. Accumulates completed rows' heights on top of the section's
+	 * start offset (`$_section_horizontal_offset`). This allows lazy loading to
+	 * defer modules that sit below the fold *inside* a single tall section, which
+	 * the section-granular `$_above_the_fold` flag cannot express.
+	 *
+	 * @var int
+	 */
+	protected $_current_section_running_offset = 0;
+
+	/**
+	 * One-way page-level latch: once the running offset reaches the threshold,
+	 * every subsequent module is below the fold for lazy-load purposes. Offset
+	 * only grows downward, so the latch never resets to false mid-render.
+	 *
+	 * Deliberately separate from `$_above_the_fold` so the CSS engine's
+	 * section-granular critical/default marking is unaffected.
+	 *
+	 * @var bool
+	 */
+	private static $_past_the_fold = false;
+
+	/**
+	 * Whether the module currently being populated/rendered is below the fold for
+	 * lazy-load deferral. Set per module during `populate_layout_data()` and read
+	 * during module render via `is_current_module_below_fold_for_lazy_load()`.
+	 *
+	 * @var bool
+	 */
+	private static $_current_module_below_fold_for_lazy_load = false;
+
+	/**
+	 * Running vertical offset within the current row/column stack, used only for
+	 * lazy-load fold detection. Complements `$_current_section_running_offset`
+	 * (which row-open finalization advances) so modules stacked inside a single row
+	 * still accumulate offset without changing the row-finalization path.
+	 *
+	 * @var int
+	 */
+	protected $_lazy_load_intrarow_running_offset = 0;
+
+	/**
+	 * Whether the current row's spacing has been applied to the lazy-load intra-row
+	 * offset for the first leaf module in that row.
+	 *
+	 * @var bool
+	 */
+	protected $_lazy_load_row_spacing_applied = false;
+
+	/**
+	 * Whether the current column's spacing has been applied to the lazy-load
+	 * intra-row offset for the first leaf module in that column.
+	 *
+	 * @var bool
+	 */
+	protected $_lazy_load_column_spacing_applied = false;
+
+	/**
 	 * Module defaults.
 	 * Once a module defaults are retrieved from ModuleRegistration class, the copy of the default attributes
 	 * are kept here so it doesn't need to keep retrieving value from MdouleRegistration.
@@ -215,7 +273,9 @@ class CriticalCSS implements DependencyInterface {
 			self::$_instance->reset_measurement_state();
 			self::$_instance->reset_dynamic_assets_state();
 		} else {
-			self::$_above_the_fold = true;
+			self::$_above_the_fold                          = true;
+			self::$_past_the_fold                           = false;
+			self::$_current_module_below_fold_for_lazy_load = false;
 		}
 	}
 
@@ -227,8 +287,14 @@ class CriticalCSS implements DependencyInterface {
 	 * @return void
 	 */
 	private function reset_measurement_state(): void {
-		self::$_above_the_fold                 = true;
-		$this->_section_horizontal_offset      = 0;
+		self::$_above_the_fold                          = true;
+		self::$_past_the_fold                           = false;
+		self::$_current_module_below_fold_for_lazy_load = false;
+		$this->_section_horizontal_offset               = 0;
+		$this->_current_section_running_offset          = 0;
+		$this->_lazy_load_intrarow_running_offset        = 0;
+		$this->_lazy_load_row_spacing_applied           = false;
+		$this->_lazy_load_column_spacing_applied        = false;
 		$this->_module_defaults                = [];
 		$this->_current_section                = '';
 		$this->_current_section_type           = 'regular';
@@ -669,6 +735,14 @@ class CriticalCSS implements DependencyInterface {
 				'spacing_height' => $spacing_height,
 				'type'           => $section_type,
 			];
+
+			// Lazy-load fold tracking: this section starts at the accumulated page
+			// offset of all previous sections. Reset row tracking so a stale row from
+			// a previous section is not finalized when this section's first row opens.
+			$this->_current_section_running_offset = $this->_section_horizontal_offset;
+			$this->_current_row                    = '';
+			$this->_lazy_load_intrarow_running_offset = 0;
+			$this->maybe_latch_past_the_fold();
 		} else {
 			switch ( $this->_current_section_type ) {
 				case 'fullwidth':
@@ -678,6 +752,7 @@ class CriticalCSS implements DependencyInterface {
 					}
 
 					$this->_layout_data[ $this->_current_section ]['children'][ $module_id ] = $module_height;
+					$this->track_lazy_load_leaf_module( $module_height, false );
 					break;
 
 				case 'specialty':
@@ -744,7 +819,18 @@ class CriticalCSS implements DependencyInterface {
 
 				default:
 					if ( 'divi/row' === $module_name ) {
+						// Finalize the previous row's measured height into the running
+						// offset (lazy-load fold tracking only). The previous row's
+						// children are fully populated by the time this row opens.
+						$this->advance_running_offset_for_completed_row( $this->_current_row );
+
 						$this->_current_row = $module_id;
+
+						// Lazy-load-only: reset intra-row offset for leaf-module tracking
+						// inside this row (see `track_lazy_load_leaf_module()`).
+						$this->_lazy_load_intrarow_running_offset  = 0;
+						$this->_lazy_load_row_spacing_applied     = false;
+						$this->_lazy_load_column_spacing_applied  = false;
 
 						$this->_layout_data[ $this->_current_section ]['children'][ $module_id ] = [
 							'children'       => [],
@@ -752,6 +838,9 @@ class CriticalCSS implements DependencyInterface {
 						];
 					} elseif ( 'divi/column' === $module_name ) {
 						$this->_current_column = $module_id;
+
+						// Lazy-load-only: reset column spacing flag for intra-row tracking.
+						$this->_lazy_load_column_spacing_applied = false;
 
 						$this->_layout_data[ $this->_current_section ]['children'][ $this->_current_row ]['children'][ $module_id ] = [
 							'children'       => [],
@@ -769,6 +858,7 @@ class CriticalCSS implements DependencyInterface {
 						}
 
 						$this->_layout_data[ $this->_current_section ]['children'][ $this->_current_row ]['children'][ $this->_current_column ]['children'][ $module_id ] = $module_height;
+						$this->track_lazy_load_leaf_module( $module_height, true );
 					}
 					break;
 			}
@@ -1132,6 +1222,169 @@ class CriticalCSS implements DependencyInterface {
 	 */
 	public static function is_above_the_fold(): bool {
 		return self::$_above_the_fold;
+	}
+
+	/**
+	 * Check if the current module is below the fold for lazy-load purposes.
+	 *
+	 * Row-granular and independent of the section-granular `is_above_the_fold()`
+	 * used by the CSS engine. Returns true once the running vertical offset
+	 * crosses the configured above-the-fold threshold (latched monotonically via
+	 * `$_past_the_fold`), so modules that sit below the fold inside a single tall
+	 * section can be detected and lazy-load scripts can be enqueued without
+	 * affecting critical CSS marking.
+	 *
+	 * For per-module deferral (video `data-src`, map `data-deferred-maps-script`,
+	 * etc.) use `is_current_module_below_fold_for_lazy_load()` instead.
+	 *
+	 * @since ??
+	 *
+	 * @return bool
+	 */
+	public static function is_below_the_fold_for_lazy_load(): bool {
+		if ( ! self::should_generate_critical_css() ) {
+			return false;
+		}
+
+		return self::$_past_the_fold;
+	}
+
+	/**
+	 * Check if the module currently being populated/rendered is below the fold.
+	 *
+	 * Lazy-load-only signal, separate from the section-granular CSS path. Set per
+	 * module during `populate_layout_data()` in `track_lazy_load_leaf_module()`
+	 * (compares the module's top offset against the threshold before its height is
+	 * applied) and read during that module's render/script-data pass.
+	 *
+	 * @since ??
+	 *
+	 * @return bool
+	 */
+	public static function is_current_module_below_fold_for_lazy_load(): bool {
+		if ( ! self::should_generate_critical_css() ) {
+			return false;
+		}
+
+		return self::$_current_module_below_fold_for_lazy_load;
+	}
+
+	/**
+	 * Latch the below-the-fold flag once the running offset reaches the threshold.
+	 *
+	 * Monotonic: once latched true it stays true for the rest of the page render,
+	 * because the running offset only grows downward.
+	 *
+	 * @since ??
+	 *
+	 * @return void
+	 */
+	protected function maybe_latch_past_the_fold(): void {
+		if ( $this->_current_section_running_offset >= $this->_above_the_fold_height ) {
+			self::$_past_the_fold = true;
+		}
+	}
+
+	/**
+	 * Finalize a completed regular row: add its measured height to the running
+	 * section offset and update the below-the-fold latch.
+	 *
+	 * Called when the next row opens, at which point the previous row's children
+	 * (columns and their modules) are fully populated in `_layout_data`, so the
+	 * row height can be computed with the same math as `get_section_children_height()`.
+	 *
+	 * @since ??
+	 *
+	 * @param string $row_id Module id of the row to finalize (empty string skips).
+	 *
+	 * @return void
+	 */
+	protected function advance_running_offset_for_completed_row( string $row_id ): void {
+		if ( '' === $row_id ) {
+			return;
+		}
+
+		$row_data = $this->_layout_data[ $this->_current_section ]['children'][ $row_id ] ?? null;
+
+		if ( ! is_array( $row_data ) ) {
+			return;
+		}
+
+		$column_height_data    = self::get_column_height_data( $row_data['children'] ?? [] );
+		$highest_column_height = ! empty( $column_height_data ) ? max( $column_height_data ) : 0;
+		$row_height            = ( $row_data['spacing_height'] ?? 0 ) + $highest_column_height;
+
+		$this->_current_section_running_offset += $row_height;
+		$this->maybe_latch_past_the_fold();
+	}
+
+	/**
+	 * Combined lazy-load top offset for the module currently being tracked.
+	 *
+	 * Section/row-finalized offset plus the intra-row accumulator. Lazy-load-only;
+	 * does not affect critical CSS measurement.
+	 *
+	 * @since ??
+	 *
+	 * @return int
+	 */
+	protected function get_lazy_load_module_top_offset(): int {
+		return $this->_current_section_running_offset + $this->_lazy_load_intrarow_running_offset;
+	}
+
+	/**
+	 * Record per-module lazy-load fold status for a leaf module (lazy-load-only).
+	 *
+	 * Complements row-open `advance_running_offset_for_completed_row()` by
+	 * accumulating offset within the current row/column stack. Fixes single-row
+	 * layouts where many modules share one row and row finalization never runs
+	 * until a second row opens (see #48067). Does not mutate
+	 * `$_current_section_running_offset` or the critical CSS path.
+	 *
+	 * @since ??
+	 *
+	 * @param int  $module_height             Assumed module height (spacing + inner).
+	 * @param bool $apply_row_column_spacing  Whether to include row/column spacing
+	 *                                        for the first module in the current row/column.
+	 *
+	 * @return void
+	 */
+	protected function track_lazy_load_leaf_module( int $module_height, bool $apply_row_column_spacing ): void {
+		if ( $apply_row_column_spacing ) {
+			if ( ! $this->_lazy_load_row_spacing_applied && '' !== $this->_current_row ) {
+				$row_data = $this->_layout_data[ $this->_current_section ]['children'][ $this->_current_row ] ?? null;
+
+				// Row spacing is folded into `advance_running_offset_for_completed_row()`
+				// when a subsequent row opens. Only add it to the intra-row accumulator
+				// for the first row while the section offset is still zero (single-row
+				// stacked-column layouts where row finalization never runs).
+				if ( is_array( $row_data ) && 0 === $this->_current_section_running_offset ) {
+					$this->_lazy_load_intrarow_running_offset += (int) ( $row_data['spacing_height'] ?? 0 );
+				}
+
+				$this->_lazy_load_row_spacing_applied = true;
+			}
+
+			if ( ! $this->_lazy_load_column_spacing_applied && '' !== $this->_current_column && '' !== $this->_current_row ) {
+				$column_data = $this->_layout_data[ $this->_current_section ]['children'][ $this->_current_row ]['children'][ $this->_current_column ] ?? null;
+
+				if ( is_array( $column_data ) ) {
+					$this->_lazy_load_intrarow_running_offset += (int) ( $column_data['spacing_height'] ?? 0 );
+				}
+
+				$this->_lazy_load_column_spacing_applied = true;
+			}
+		}
+
+		self::$_current_module_below_fold_for_lazy_load = (
+			$this->get_lazy_load_module_top_offset() >= $this->_above_the_fold_height
+		);
+
+		if ( self::$_current_module_below_fold_for_lazy_load ) {
+			self::$_past_the_fold = true;
+		}
+
+		$this->_lazy_load_intrarow_running_offset += $module_height;
 	}
 
 	/**

@@ -61,6 +61,19 @@ class ET_Theme_Builder_Request {
 		$page_for_posts = (int) get_option( 'page_for_posts' );
 		$is_blog_page   = 0 !== $page_for_posts && is_page( $page_for_posts );
 
+		if (
+			class_exists( 'WooCommerce' )
+			&& function_exists( 'is_shop' )
+			&& function_exists( 'wc_get_page_id' )
+			&& is_shop()
+		) {
+			$shop_page_id = wc_get_page_id( 'shop' );
+
+			if ( $shop_page_id > 0 ) {
+				return new self( self::TYPE_POST_TYPE_ARCHIVE, 'product', $shop_page_id );
+			}
+		}
+
 		if ( is_singular() ) {
 			return new self( self::TYPE_SINGULAR, get_post_type( $id ), $id );
 		}

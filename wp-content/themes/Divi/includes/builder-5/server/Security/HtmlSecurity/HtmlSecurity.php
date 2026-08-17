@@ -51,6 +51,7 @@ class HtmlSecurity {
 		'li',
 		'main',
 		'mark',
+		'menu',
 		'nav',
 		'p',
 		'section',

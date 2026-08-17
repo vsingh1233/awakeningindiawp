@@ -218,6 +218,38 @@ class ConditionsHooks {
 	}
 
 	/**
+	 * Resolve the post ID used for page/post visit cookie tracking.
+	 *
+	 * In Theme Builder layout rendering the post stack is spoofed to the layout post.
+	 * Tracking must use the viewed page/post from the main query.
+	 *
+	 * @since ??
+	 *
+	 * @return int Post ID to track, or 0 when tracking should not run.
+	 */
+	public static function get_post_visit_tracking_post_id(): int {
+		$is_shop_page = class_exists( 'WooCommerce' ) && is_shop();
+
+		if ( ! is_singular() && ! $is_shop_page ) {
+			return 0;
+		}
+
+		$current_post_id = $is_shop_page ? (int) wc_get_page_id( 'shop' ) : (int) get_queried_object_id();
+
+		if ( class_exists( '\ET_Theme_Builder_Layout' )
+			&& \ET_Theme_Builder_Layout::is_theme_builder_layout()
+			&& class_exists( '\ET_Post_Stack' ) ) {
+			$main_post_id = (int) \ET_Post_Stack::get_main_post_id();
+
+			if ( $main_post_id > 0 ) {
+				$current_post_id = $main_post_id;
+			}
+		}
+
+		return $current_post_id;
+	}
+
+	/**
 	 * Sets a cookie based on page visits so Page/Post Visit Display Conditions would function as expected.
 	 *
 	 * @since ??
@@ -242,12 +274,8 @@ class ConditionsHooks {
 			return;
 		}
 
-		$is_shop_page = class_exists( 'WooCommerce' ) && is_shop();
-		if ( ! is_singular() && ! $is_shop_page ) {
-			return;
-		}
+		$current_post_id = self::get_post_visit_tracking_post_id();
 
-		$current_post_id = $is_shop_page ? (int) wc_get_page_id( 'shop' ) : get_queried_object_id();
 		if ( 0 >= $current_post_id ) {
 			return;
 		}
@@ -277,7 +305,10 @@ class ConditionsHooks {
 				'id' => $current_post_id,
 			];
 			$new_cookie   = base64_encode( wp_json_encode( $new_cookie ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode  -- base64_encode data is an array.
-			setrawcookie( 'divi_post_visit', $new_cookie, time() + 3600 * 24 * 365, COOKIEPATH, COOKIE_DOMAIN, is_ssl() );
+
+			if ( ! headers_sent() ) {
+				setrawcookie( 'divi_post_visit', $new_cookie, time() + 3600 * 24 * 365, COOKIEPATH, COOKIE_DOMAIN, is_ssl() );
+			}
 		}
 	}
 

@@ -218,7 +218,7 @@ class DiviLibraryController extends RESTController {
 
 				// Apply full conversion (includes migration + format conversion).
 				// Pass post ID for global module template selective sync conversion.
-				$result['content'] = BuilderConversion::maybeConvertContent( $result['content'], true, $post->ID );
+				$result['content'] = BuilderConversion::maybeConvertContent( $result['content'], true, $post->ID, true );
 			}
 
 			// Apply D5-to-D5 migrations (AttributeMigration, etc.).
@@ -618,7 +618,7 @@ class DiviLibraryController extends RESTController {
 			if ( Conditions::has_shortcode( '', $layout_content ) ) {
 				BuilderConversion::initialize_shortcode_framework();
 				do_action( 'divi_visual_builder_before_d4_conversion' );
-				$layout_content = BuilderConversion::maybeConvertContent( $layout_content, true );
+				$layout_content = BuilderConversion::maybeConvertContent( $layout_content, true, null, true );
 			}
 
 			$layout_content = apply_filters( 'divi_framework_portability_import_migrated_post_content', $layout_content );

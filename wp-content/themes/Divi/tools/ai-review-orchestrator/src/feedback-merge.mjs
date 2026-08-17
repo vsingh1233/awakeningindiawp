@@ -12,6 +12,7 @@ import {
   insertPatch,
   openDb,
 } from "./db.mjs";
+import { trimDiffHunk } from "./feedback-context.mjs";
 
 const args = process.argv.slice(2);
 
@@ -401,7 +402,8 @@ const fetchClustersForGeneration = (db, { runId, includeDecided }) =>
       SELECT
         c.id as cluster_id,
         c.title as cluster_title,
-        c.summary as cluster_summary
+        c.summary as cluster_summary,
+        c.tags_json as cluster_tags
       FROM clusters c
       WHERE c.run_id = ?
       ${includeDecided ? "" : "AND NOT EXISTS (SELECT 1 FROM decisions d JOIN findings f ON f.id = d.finding_id WHERE f.cluster_id = c.id)"}
@@ -422,8 +424,19 @@ const fetchClusterMembersDetailed = (db, clusterId, limit) =>
         c.path,
         c.created_at,
         c.body,
+        c.diff_hunk,
+        c.normalized_claim,
+        c.normalized_kind,
+        c.normalized_signal,
+        c.reviewer_hint,
         p.number as pr_number,
-        p.title as pr_title
+        p.title as pr_title,
+        p.body_summary as pr_summary,
+        (
+          SELECT GROUP_CONCAT(tag, ', ')
+          FROM comment_tags
+          WHERE comment_id = c.id
+        ) as tags
       FROM cluster_members cm
       INNER JOIN comments c ON c.id = cm.comment_id
       INNER JOIN prs p ON p.id = c.pr_id
@@ -433,6 +446,28 @@ const fetchClusterMembersDetailed = (db, clusterId, limit) =>
     `
     )
     .all(clusterId, limit);
+
+const formatClusterTags = (tagsJson) => {
+  if (null == tagsJson || "" === String(tagsJson).trim()) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(tagsJson);
+    if (false === Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((entry) => {
+        if (null == entry?.tag) {
+          return null;
+        }
+        return `${entry.tag}${entry.count ? ` (${entry.count})` : ""}`;
+      })
+      .filter(Boolean);
+  } catch (error) {
+    return [];
+  }
+};
 
 const readReviewerContent = (filePath) => {
   if (false === fs.existsSync(filePath)) {
@@ -465,6 +500,7 @@ const buildOnTheFlyPrompt = ({
   clusterId,
   clusterTitle,
   clusterSummary,
+  clusterTags,
   members,
   reviewerContents,
   targetReviewer,
@@ -488,15 +524,23 @@ const buildOnTheFlyPrompt = ({
         `Cluster ID: ${clusterId}`,
         clusterTitle ? `Cluster theme: ${clusterTitle}` : "",
         clusterSummary ? `Cluster summary: ${clusterSummary}` : "",
+        clusterTags && clusterTags.length
+          ? `Cluster tags: ${clusterTags.join(", ")}`
+          : "",
         "",
-        "## Cluster Members (PR Comments)",
+        "## Cluster Members (normalized feedback)",
         JSON.stringify(
           members.map((m) => ({
-            author: m.author,
-            type: m.type,
+            claim: m.normalized_claim || null,
+            kind: m.normalized_kind || null,
+            signal: m.normalized_signal || null,
+            tags: m.tags || null,
+            reviewer_hint: m.reviewer_hint || null,
             path: m.path,
+            hunk: trimDiffHunk(m.diff_hunk, 20) || null,
             pr: `#${m.pr_number} ${m.pr_title}`,
-            body: m.body?.slice(0, 500), // Truncate long comments.
+            pr_summary: m.pr_summary || null,
+            body: m.body?.slice(0, 400),
             distance: m.distance,
           })),
           null,
@@ -531,6 +575,9 @@ const buildOnTheFlyPrompt = ({
         "}",
         "",
         "Rules:",
+        "- Prefer clusters that are both common (repeated claim/tags) and high-signal (signal=high, kind=security/correctness).",
+        "- Use CLAIM + TAGS as the pattern to teach. Do not lock unique PR titles, module names, or issue numbers into reviewer files.",
+        "- Low-signal nits and process comments should usually produce no suggestion.",
         "- suggestion_text should be specific, actionable guidance a reviewer can follow.",
         "- Write suggestion_text in the same voice as the reviewer files:",
         "- Imperative reviewer guidance (e.g., \"Check that...\", \"Verify...\", \"Flag...\", \"Avoid...\").",
@@ -554,6 +601,7 @@ const generateOnTheFlySuggestion = async ({
   clusterId,
   clusterTitle,
   clusterSummary,
+  clusterTags,
   members,
   reviewerContents,
   targetReviewer,
@@ -564,6 +612,7 @@ const generateOnTheFlySuggestion = async ({
       clusterId,
       clusterTitle,
       clusterSummary,
+      clusterTags,
       members,
       reviewerContents,
       targetReviewer,
@@ -611,7 +660,7 @@ const main = async () => {
   const generationModel =
     getArgValue("--generation-model") ||
     process.env.OPENAI_SUMMARY_MODEL ||
-    "gpt-5.1-codex-mini";
+    "gpt-5.4-mini";
   const maxCommentsValue = getArgValue("--max-comments");
   const maxComments = null == maxCommentsValue ? 15 : Number(maxCommentsValue);
   const dbContext = useDb ? openDb({ repoRoot, dbPath: dbArg }) : null;
@@ -688,6 +737,7 @@ const main = async () => {
       cluster_id: cluster.cluster_id,
       cluster_summary: cluster.cluster_summary ?? "",
       cluster_title: cluster.cluster_title ?? "",
+      cluster_tags: formatClusterTags(cluster.cluster_tags),
       _generationMode: true,
     }));
   } else if (true === fromDb) {
@@ -756,7 +806,7 @@ const main = async () => {
       throw new Error("Missing OPENAI_API_KEY (required for --rewrite-ai).");
     }
     if (null == rewriteModel || "" === rewriteModel) {
-      rewriteModel = process.env.OPENAI_SUMMARY_MODEL || "gpt-5.1-codex-mini";
+      rewriteModel = process.env.OPENAI_SUMMARY_MODEL || "gpt-5.4-mini";
     }
     rewriteClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   }
@@ -787,6 +837,9 @@ const main = async () => {
 
       console.log(chalk.dim(`Cluster has ${members.length} member comments`));
       console.log(chalk.dim(`Cluster theme: ${baseSuggestion.cluster_title || "(none)"}`));
+      if (baseSuggestion.cluster_tags && 0 < baseSuggestion.cluster_tags.length) {
+        console.log(chalk.dim(`Cluster tags: ${baseSuggestion.cluster_tags.join(", ")}`));
+      }
 
       const generated = await generateOnTheFlySuggestion({
         client: generationClient,
@@ -794,6 +847,7 @@ const main = async () => {
         clusterId: baseSuggestion.cluster_id,
         clusterTitle: baseSuggestion.cluster_title,
         clusterSummary: baseSuggestion.cluster_summary,
+        clusterTags: baseSuggestion.cluster_tags,
         members,
         reviewerContents,
         targetReviewer: null, // Let AI decide.
@@ -843,6 +897,9 @@ const main = async () => {
       `${chalk.bold("Patch type:")} ${suggestion.patch_type || "reviewer"}`,
       `${chalk.bold("Issue/Theme:")} ${suggestion.issue || "(none)"}`,
       `${chalk.bold("Cluster:")} ${suggestion.cluster_id ?? "(none)"}`,
+      suggestion.cluster_tags && 0 < suggestion.cluster_tags.length
+        ? `${chalk.bold("Tags:")} ${suggestion.cluster_tags.join(", ")}`
+        : null,
       suggestion.rationale
         ? `${chalk.bold("Rationale:")} ${suggestion.rationale}`
         : null,

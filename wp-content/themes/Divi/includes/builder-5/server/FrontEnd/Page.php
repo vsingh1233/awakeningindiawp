@@ -133,7 +133,12 @@ class Page {
 			);
 		}
 
-		if ( isset( $page_settings['et_pb_page_z_index'] ) && '' !== $page_settings['et_pb_page_z_index'] ) {
+		// Skip "auto": VB treats it as no override (#39564); emitting it breaks theme header stacking.
+		if (
+			isset( $page_settings['et_pb_page_z_index'] )
+			&& '' !== $page_settings['et_pb_page_z_index']
+			&& 'auto' !== $page_settings['et_pb_page_z_index']
+		) {
 			$output .= sprintf(
 				'%2$s .et_builder_inner_content { z-index: %1$s; }',
 				esc_html( $page_settings['et_pb_page_z_index'] ),

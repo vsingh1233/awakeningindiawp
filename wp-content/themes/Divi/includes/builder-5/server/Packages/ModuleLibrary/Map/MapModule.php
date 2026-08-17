@@ -30,6 +30,9 @@ use ET\Builder\Packages\StyleLibrary\Utils\StyleDeclarations;
 use ET\Builder\Packages\GlobalData\GlobalPresetItemGroup;
 use ET\Builder\Packages\GlobalData\GlobalData;
 use ET\Builder\Packages\ModuleUtils\ModuleUtils;
+use ET\Builder\Packages\ModuleLibrary\Map\MapUtils;
+use ET\Builder\FrontEnd\Module\ScriptData;
+use ET\Builder\FrontEnd\Assets\CriticalCSS;
 
 /**
  * `Map` is consisted of functions used for Map such as Front-End rendering, REST API Endpoints etc.
@@ -98,6 +101,9 @@ class MapModule implements DependencyInterface {
 	public static function module_script_data( $args ) {
 		// Assign variables.
 		$elements = $args['elements'];
+		$id       = $args['id'] ?? '';
+		$selector = $args['selector'] ?? '';
+		$attrs    = $args['attrs'] ?? [];
 
 		// Element Script Data Options.
 		$elements->script_data(
@@ -105,6 +111,26 @@ class MapModule implements DependencyInterface {
 				'attrName' => 'module',
 			]
 		);
+
+		$map_lat_long_data = $attrs['map']['innerContent']['desktop']['value'] ?? [];
+
+		if ( isset( $map_lat_long_data['lat'] ) && isset( $map_lat_long_data['lng'] ) ) {
+			// Register script data for lazy loading. The `is_above_the_fold` flag
+			// uses the lazy-load fold signal (row-granular) so maps below the fold
+			// inside a single tall section are detected and deferred correctly.
+			$is_below_the_fold = CriticalCSS::should_generate_critical_css() && CriticalCSS::is_current_module_below_fold_for_lazy_load();
+
+			ScriptData::add_data_item(
+				[
+					'data_name'    => 'map_lazy_load',
+					'data_item_id' => $id,
+					'data_item'    => [
+						'selector'          => $selector,
+						'is_above_the_fold' => ! $is_below_the_fold,
+					],
+				]
+			);
+		}
 	}
 
 	/**
@@ -144,26 +170,44 @@ class MapModule implements DependencyInterface {
 		$use_grayscale_filter    = isset( $grayscale_filter['enabled'] ) && 'on' === $grayscale_filter['enabled'];
 		$grayscale_filter_amount = $grayscale_filter['amount'] ?? '';
 
+		// Check if map should be deferred (below the fold).
+		$should_defer_map = MapUtils::should_defer_map_loading();
+
 		// Google Maps API Script Handling for GDPR Plugin Compatibility.
 		// Always register Google Maps script so GDPR plugins can detect/replace it, matching Divi 4 behavior.
 		// Ensures script handle exists even if enqueueing is blocked by GDPR controls.
-		$should_enqueue_maps = et_pb_enqueue_google_maps_script();
+		$is_maps_enqueue_managed_by_divi = et_pb_enqueue_google_maps_script();
 
-		if ( $should_enqueue_maps ) {
-			// Standard path: GDPR plugin allows maps or no GDPR plugin is active.
-			wp_enqueue_script( 'google-maps-api' );
-		} else {
-			// GDPR blocked path: Register script directly so GDPR plugins can detect and replace it.
-			// This maintains backward compatibility with Divi 4 GDPR plugins.
-			$google_api_key = et_pb_get_google_api_key();
+		// Get Google Maps API URL for potential deferred loading.
+		$google_api_key           = et_pb_get_google_api_key();
+		$google_maps_api_url_args = [
+			'v'         => 3,
+			'key'       => $google_api_key,
+			'libraries' => 'marker',
+			'loading'   => 'async',
+		];
+		$google_maps_api_url      = add_query_arg( $google_maps_api_url_args, is_ssl() ? 'https://maps.googleapis.com/maps/api/js' : 'http://maps.googleapis.com/maps/api/js' );
 
-			$google_maps_api_url_args = [
-				'v'   => 3,
-				'key' => $google_api_key,
-			];
-			$google_maps_api_url      = add_query_arg( $google_maps_api_url_args, is_ssl() ? 'https://maps.googleapis.com/maps/api/js' : 'http://maps.googleapis.com/maps/api/js' );
-
-			// Register and enqueue script bypassing all filters.
+		// Defer script loading if map is below the fold.
+		if ( ! $should_defer_map ) {
+			if ( $is_maps_enqueue_managed_by_divi ) {
+				// Standard path: GDPR plugin allows maps or no GDPR plugin is active.
+				wp_enqueue_script( 'google-maps-api' );
+			} else {
+				// GDPR blocked path: Register script directly so GDPR plugins can detect and replace it.
+				// This maintains backward compatibility with Divi 4 GDPR plugins.
+				// Register and enqueue script bypassing all filters.
+				wp_register_script(
+					'google-maps-api',
+					esc_url_raw( $google_maps_api_url ),
+					[],
+					ET_BUILDER_VERSION,
+					true
+				);
+				wp_enqueue_script( 'google-maps-api' );
+			}
+		} elseif ( ! $is_maps_enqueue_managed_by_divi ) {
+			// Deferred path: register handle only so GDPR/consent plugins can detect/replace it.
 			wp_register_script(
 				'google-maps-api',
 				esc_url_raw( $google_maps_api_url ),
@@ -171,20 +215,22 @@ class MapModule implements DependencyInterface {
 				ET_BUILDER_VERSION,
 				true
 			);
-			wp_enqueue_script( 'google-maps-api' );
 		}
+
+		// Build map container attributes.
+		$map_container_attributes = [
+			'class'                => 'et_pb_map',
+			'data-center-lat'      => $lat,
+			'data-center-lng'      => $lng,
+			'data-zoom'            => $zoom,
+			'data-mouse-wheel'     => $mouse_wheel,
+			'data-mobile-dragging' => $mobile_dragging,
+		];
 
 		$map_container = HTMLUtility::render(
 			[
 				'tag'        => 'div',
-				'attributes' => [
-					'class'                => 'et_pb_map',
-					'data-center-lat'      => $lat,
-					'data-center-lng'      => $lng,
-					'data-zoom'            => $zoom,
-					'data-mouse-wheel'     => $mouse_wheel,
-					'data-mobile-dragging' => $mobile_dragging,
-				],
+				'attributes' => $map_container_attributes,
 			]
 		);
 
@@ -192,6 +238,16 @@ class MapModule implements DependencyInterface {
 		$children .= $content;
 
 		$parent = BlockParserStore::get_parent( $block->parsed_block['id'], $block->parsed_block['storeInstance'] );
+
+		// Build htmlAttrs for module wrapper container.
+		$html_attrs = [
+			'data-grayscale' => $use_grayscale_filter ? esc_attr( $grayscale_filter_amount ) : '',
+		];
+
+		// Add deferred script URL to wrapper container if map is below the fold.
+		if ( $should_defer_map ) {
+			$html_attrs['data-deferred-maps-script'] = esc_url_raw( $google_maps_api_url );
+		}
 
 		return Module::render(
 			[
@@ -202,7 +258,7 @@ class MapModule implements DependencyInterface {
 				// VB equivalent.
 				'id'                       => $block->parsed_block['id'],
 				'name'                     => $block->block_type->name,
-				'htmlAttrs'                => [ 'data-grayscale' => $use_grayscale_filter ? esc_attr( $grayscale_filter_amount ) : '' ],
+				'htmlAttrs'                => $html_attrs,
 				'moduleCategory'           => $block->block_type->category,
 				'attrs'                    => $attrs,
 				'defaultPrintedStyleAttrs' => $default_printed_style_attrs,

@@ -42,6 +42,23 @@ if ( ! defined( 'ET_BUILDER_5_URI' ) ) {
 require_once __DIR__ . '/Security/Security.php';
 
 /*
+ * Register post-filter custom field option cache invalidation only where post meta can change.
+ * This must not depend on Modules.php, which is not loaded on standard admin CPT edit screens.
+ * Hook registration is lightweight; the flush callbacks only run on meta/status/post save events.
+ */
+$should_register_post_filter_cache_hooks = (
+	Conditions::is_wp_post_edit_screen()
+	|| Conditions::is_rest_api_request()
+	|| Conditions::is_ajax_request()
+);
+
+if ( $should_register_post_filter_cache_hooks ) {
+	require_once __DIR__ . '/Packages/ModuleLibrary/PostFilterItem/PostFilterCustomFieldValueOptions.php';
+
+	\ET\Builder\Packages\ModuleLibrary\PostFilterItem\PostFilterCustomFieldValueOptions::register_hooks();
+}
+
+/*
  * Only load lf we are:
  * - on a theme builder page,
  * - or on a WP post edit screen,

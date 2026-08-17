@@ -247,9 +247,19 @@ class TextModule implements DependencyInterface {
 	 * ```
 	 */
 	public static function module_styles( array $args ): void {
-		$attrs    = $args['attrs'] ?? [];
-		$elements = $args['elements'];
-		$settings = $args['settings'] ?? [];
+		$attrs                       = $args['attrs'] ?? [];
+		$elements                    = $args['elements'];
+		$settings                    = $args['settings'] ?? [];
+		$default_printed_style_attrs = $args['defaultPrintedStyleAttrs'] ?? [];
+
+		$preset_printed_module_text = isset( $elements->preset_printed_style_attrs ) && is_array( $elements->preset_printed_style_attrs )
+			? ( $elements->preset_printed_style_attrs['module']['advanced']['text'] ?? [] )
+			: [];
+
+		$module_text_default_printed_style_attr = array_replace_recursive(
+			$default_printed_style_attrs['module']['advanced']['text'] ?? [],
+			$preset_printed_module_text
+		);
 
 		$color_important = [
 			'font' => [
@@ -280,7 +290,8 @@ class TextModule implements DependencyInterface {
 									[
 										'componentName' => 'divi/text',
 										'props'         => [
-											'attr' => $attrs['module']['advanced']['text'] ?? [],
+											'attr'                    => $attrs['module']['advanced']['text'] ?? [],
+											'defaultPrintedStyleAttr' => $module_text_default_printed_style_attr,
 										],
 									],
 									[
@@ -331,10 +342,11 @@ class TextModule implements DependencyInterface {
 	 *
 	 * @since ??
 	 *
-	 * @param array          $attrs                 The block attributes that were saved by the Visual Builder.
-	 * @param string         $child_modules_content The block content.
-	 * @param WP_Block       $block                 The parsed block object that is being rendered.
-	 * @param ModuleElements $elements              An instance of the ModuleElements class.
+	 * @param array          $attrs                       The block attributes that were saved by the Visual Builder.
+	 * @param string         $child_modules_content       The block content.
+	 * @param WP_Block       $block                       The parsed block object that is being rendered.
+	 * @param ModuleElements $elements                    An instance of the ModuleElements class.
+	 * @param array          $default_printed_style_attrs Default printed style attributes.
 	 *
 	 * @return string The rendered HTML for the module.
 	 *
@@ -352,7 +364,7 @@ class TextModule implements DependencyInterface {
 	 * echo $html;
 	 * ```
 	 */
-	public static function render_callback( array $attrs, string $child_modules_content, WP_Block $block, ModuleElements $elements ): string {
+	public static function render_callback( array $attrs, string $child_modules_content, WP_Block $block, ModuleElements $elements, array $default_printed_style_attrs ): string {
 		// Content.
 		$content = $elements->render(
 			[
@@ -388,18 +400,19 @@ class TextModule implements DependencyInterface {
 				'storeInstance'       => $block->parsed_block['storeInstance'],
 
 				// VB equivalent.
-				'attrs'               => $attrs,
-				'elements'            => $elements,
-				'id'                  => $block->parsed_block['id'],
-				'name'                => $block->block_type->name,
-				'classnamesFunction'  => [ self::class, 'module_classnames' ],
-				'moduleCategory'      => $block->block_type->category,
-				'stylesComponent'     => [ self::class, 'module_styles' ],
-				'scriptDataComponent' => [ self::class, 'module_script_data' ],
-				'parentAttrs'         => $parent->attrs ?? [],
-				'parentId'            => $parent->id ?? '',
-				'parentName'          => $parent->blockName ?? '',
-				'childrenIds'         => $children_ids,
+				'attrs'                    => $attrs,
+				'elements'                 => $elements,
+				'defaultPrintedStyleAttrs' => $default_printed_style_attrs,
+				'id'                       => $block->parsed_block['id'],
+				'name'                     => $block->block_type->name,
+				'classnamesFunction'       => [ self::class, 'module_classnames' ],
+				'moduleCategory'           => $block->block_type->category,
+				'stylesComponent'          => [ self::class, 'module_styles' ],
+				'scriptDataComponent'      => [ self::class, 'module_script_data' ],
+				'parentAttrs'              => $parent->attrs ?? [],
+				'parentId'                 => $parent->id ?? '',
+				'parentName'               => $parent->blockName ?? '',
+				'childrenIds'              => $children_ids,
 				'children'            => $elements->style_components(
 					[
 						'attrName' => 'module',

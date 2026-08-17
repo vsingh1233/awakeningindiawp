@@ -265,6 +265,7 @@ class AdvancedOptionConversion {
         'd4_attr_name_line_height' => 'lineHeight',
         'd4_attr_name_text_align' => 'textAlign',
         'd4_attr_name_text_color' => 'color',
+        'd4_attr_name_all_caps' => 'capitalization',
     ];
 
     /**
@@ -279,6 +280,7 @@ class AdvancedOptionConversion {
      */
     public static $fontValueConversionFunctionMap = [
         'font' => 'ET\Builder\Packages\Conversion\AdvancedOptionConversion::convertFont',
+        'capitalization' => 'ET\Builder\Packages\Conversion\AdvancedOptionConversion::convertAllCaps',
     ];
 
 	/**
@@ -1540,7 +1542,13 @@ class AdvancedOptionConversion {
 	 * @return array The converted Post Tag or Tag Page condition settings value.
 	 */
 	public static function convert_tags_condition_settings( $d4_condition_settings ) {
-		$d4_condition_settings_tags = isset( $d4_condition_settings['tags'] ) ? $d4_condition_settings['tags'] : [];
+		if ( isset( $d4_condition_settings['tags'] ) && is_array( $d4_condition_settings['tags'] ) ) {
+			$d4_condition_settings_tags = $d4_condition_settings['tags'];
+		} elseif ( isset( $d4_condition_settings['categories'] ) && is_array( $d4_condition_settings['categories'] ) ) {
+			$d4_condition_settings_tags = $d4_condition_settings['categories'];
+		} else {
+			$d4_condition_settings_tags = [];
+		}
 		$d5_condition_settings_tags = array_filter(
 			$d4_condition_settings_tags,
 			function( $d4_tag ) {
@@ -2508,6 +2516,9 @@ class AdvancedOptionConversion {
 
         if (!empty($fontWeight)) {
             $font['weight'] = 'on' === $fontWeight ? '700' : $fontWeight;
+        } elseif ( '' !== $value ) {
+            // Preserve D4 "regular" override when weight is empty.
+            $font['weight'] = '400';
         }
 
         if (!empty($fontStyle)) {
@@ -2527,6 +2538,27 @@ class AdvancedOptionConversion {
         }
 
         return $font;
+    }
+
+	/**
+     * Convert D4 `{font}_all_caps` attribute value to D5 capitalization.
+     *
+     * D4 stores all-caps as a standalone on/off hidden attribute separate from the
+     * pipe-delimited font string. D5 expects `uppercase` or an empty string.
+     *
+     * @since ??
+     *
+     * @param string $value        Shortcode attribute value for all caps.
+     * @param array  $extra_params Optional conversion context.
+     *
+     * @return string D5 capitalization value.
+     */
+    public static function convertAllCaps( $value, $extra_params = [] ) {
+        if ( is_string( $value ) && 0 === strpos( $value, 'on' ) ) {
+            return 'uppercase';
+        }
+
+        return '';
     }
 
 	/**

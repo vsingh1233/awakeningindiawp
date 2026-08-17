@@ -3,6 +3,7 @@ import path from "path";
 import dotenv from "dotenv";
 import OpenAI from "openai";
 import { getDefaultDbPath, insertFinding, openDb } from "./db.mjs";
+import { trimDiffHunk } from "./feedback-context.mjs";
 
 const args = process.argv.slice(2);
 
@@ -34,7 +35,7 @@ const loadEnv = (repoRoot) => {
   }
 };
 
-const buildClusterPrompt = ({ reviewerNames, clusterId, members }) => [
+const buildClusterPrompt = ({ reviewerNames, clusterId, clusterTags, members }) => [
   {
     role: "system",
     content:
@@ -45,11 +46,16 @@ const buildClusterPrompt = ({ reviewerNames, clusterId, members }) => [
     content: [
       "Given the clustered PR feedback, produce a generalized reviewer update.",
       "Focus on repeatable reviewer wisdom, not PR-specific details.",
+      "Prefer common + high-signal claims (signal=high, kind=security/correctness) over nits.",
+      "Use CLAIM + TAGS as the pattern. Do not lock unique module names or issue numbers.",
       "",
       `Reviewer names: ${reviewerNames.join(", ") || "none"}`,
       `Cluster ID: ${clusterId}`,
+      clusterTags && clusterTags.length
+        ? `Cluster tags: ${clusterTags.join(", ")}`
+        : "",
       "",
-      "Comments (JSON):",
+      "Normalized comments (JSON):",
       JSON.stringify(members, null, 2),
       "",
       "Return JSON only with:",
@@ -70,14 +76,28 @@ const buildClusterPrompt = ({ reviewerNames, clusterId, members }) => [
       "- patch_type must be one of: reviewer, rule, docs, other.",
       "- If operation is replace, provide target_text to replace.",
       "- Avoid copy-pasting comment text verbatim.",
-    ].join("\n"),
+    ]
+      .filter(Boolean)
+      .join("\n"),
   },
 ];
 
-const summarizeCluster = async ({ client, model, reviewerNames, clusterId, members }) => {
+const summarizeCluster = async ({
+  client,
+  model,
+  reviewerNames,
+  clusterId,
+  clusterTags,
+  members,
+}) => {
   const response = await client.responses.create({
     model,
-    input: buildClusterPrompt({ reviewerNames, clusterId, members }),
+    input: buildClusterPrompt({
+      reviewerNames,
+      clusterId,
+      clusterTags,
+      members,
+    }),
   });
   const outputText =
     response.output_text ||
@@ -117,7 +137,7 @@ const fetchClusters = (db, { runId, includeSummarized }) =>
   db
     .prepare(
       `
-      SELECT id, summary
+      SELECT id, summary, tags_json
       FROM clusters
       WHERE run_id = ?
         AND (? = 1 OR summary IS NULL OR summary = '')
@@ -137,9 +157,23 @@ const fetchClusterMembers = (db, clusterId, limit) =>
         c.type,
         c.path,
         c.created_at,
-        c.body
+        c.body,
+        c.diff_hunk,
+        c.normalized_claim,
+        c.normalized_kind,
+        c.normalized_signal,
+        c.reviewer_hint,
+        p.number as pr_number,
+        p.title as pr_title,
+        p.body_summary as pr_summary,
+        (
+          SELECT GROUP_CONCAT(tag, ', ')
+          FROM comment_tags
+          WHERE comment_id = c.id
+        ) as tags
       FROM cluster_members cm
       INNER JOIN comments c ON c.id = cm.comment_id
+      INNER JOIN prs p ON p.id = c.pr_id
       WHERE cm.cluster_id = ?
       ORDER BY cm.distance ASC
       LIMIT ?
@@ -207,12 +241,40 @@ const main = async () => {
     if (0 === members.length) {
       continue;
     }
+    let clusterTags = [];
+    try {
+      const parsedTags = JSON.parse(cluster.tags_json || "[]");
+      if (true === Array.isArray(parsedTags)) {
+        clusterTags = parsedTags
+          .map((entry) =>
+            entry?.tag
+              ? `${entry.tag}${entry.count ? ` (${entry.count})` : ""}`
+              : null
+          )
+          .filter(Boolean);
+      }
+    } catch (error) {
+      clusterTags = [];
+    }
     const summaryText = await summarizeCluster({
       client,
       model: analysisModel,
       reviewerNames,
       clusterId: cluster.id,
-      members,
+      clusterTags,
+      members: members.map((member) => ({
+        comment_id: member.comment_id,
+        claim: member.normalized_claim,
+        kind: member.normalized_kind,
+        signal: member.normalized_signal,
+        tags: member.tags,
+        path: member.path,
+        hunk: trimDiffHunk(member.diff_hunk, 20) || null,
+        pr: `#${member.pr_number} ${member.pr_title}`,
+        pr_summary: member.pr_summary,
+        body: member.body?.slice(0, 400),
+        distance: member.distance,
+      })),
     });
     let summaryJson = null;
     try {

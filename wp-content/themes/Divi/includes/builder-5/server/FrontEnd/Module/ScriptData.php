@@ -26,6 +26,27 @@ if ( ! defined( 'ABSPATH' ) ) {
 class ScriptData {
 
 	/**
+	 * Default script data buckets.
+	 *
+	 * Single source of truth for the keys that `$_script_data` is initialized with and that
+	 * `reset()` restores. Keeping this in one place prevents `reset()` from drifting out of sync
+	 * with the declared shape (which previously caused stale lazy-load entries to leak across
+	 * test and rendering runs).
+	 *
+	 * @since ??
+	 */
+	private const DEFAULT_SCRIPT_DATA = [
+		'scroll'           => [],
+		'sticky'           => [],
+		'animation'        => [],
+		'interactions'     => [],
+		'link'             => [],
+		'video_lazy_load'  => [],
+		'map_lazy_load'    => [],
+		'slider_lazy_load' => [],
+	];
+
+	/**
 	 * Get the script data properties for the module.
 	 *
 	 * Retrieves an array of script data properties for the current module. These properties can be
@@ -64,13 +85,7 @@ class ScriptData {
 	 * // Returns array( 'property1' => 'value1', 'property2' => 'value2' )
 	 * ```
 	 */
-	private static $_script_data = [
-		'scroll'       => [],
-		'sticky'       => [],
-		'animation'    => [],
-		'interactions' => [],
-		'link'         => [],
-	];
+	private static $_script_data = self::DEFAULT_SCRIPT_DATA;
 
 	/**
 	 * Retrieves the mapping of object name to script handle.
@@ -97,6 +112,7 @@ class ScriptData {
 			'diviElementInteractionsData'       => 'divi-script-library-interactions',
 			'diviElementLinkData'               => 'divi-script-library-link',
 			'diviModuleCircleCounterData'       => 'divi-module-library-script-circle-counter',
+			'diviModuleChartsData'              => 'divi-module-library-script-charts',
 			'diviModuleContactFormData'         => 'divi-module-library-script-contact-form',
 			'diviModuleNumberCounterData'       => 'divi-module-library-script-number-counter',
 			'diviModuleTableOfContentsData'     => 'divi-module-library-script-table-of-contents',
@@ -107,6 +123,9 @@ class ScriptData {
 			'diviElementBackgroundParallaxData' => 'divi-module-script-background-parallax',
 			'diviElementBackgroundVideoData'    => 'divi-module-script-background-video',
 			'diviElementMultiViewData'          => MultiViewAssets::script_handle(),
+			'diviVideoLazyLoadData'             => 'divi-script-library-video-lazy-load',
+			'diviMapLazyLoadData'               => 'divi-script-library-map',
+			'diviSliderLazyLoadData'            => 'divi-script-library-slider',
 
 			// System.
 			'diviBreakpointData'                => [
@@ -161,9 +180,13 @@ class ScriptData {
 		'scroll'              => 'diviElementScrollData',
 		'sticky'              => 'diviElementStickyData',
 		'multi_view'          => 'diviElementMultiViewData',
+		'video_lazy_load'     => 'diviVideoLazyLoadData',
+		'map_lazy_load'       => 'diviMapLazyLoadData',
+		'slider_lazy_load'    => 'diviSliderLazyLoadData',
 
 		// Module.
 		'circle_counter'      => 'diviModuleCircleCounterData',
+		'charts'              => 'diviModuleChartsData',
 		'contact_form'        => 'diviModuleContactFormData',
 		'number_counter'      => 'diviModuleNumberCounterData',
 		'table_of_contents'   => 'diviModuleTableOfContentsData',
@@ -295,16 +318,19 @@ class ScriptData {
 
 		if ( $is_single_script_name ) {
 
-			// Enqueue script if it's registered and not enqueued.
+			// Ensure script is registered before localizing (wp_localize_script requires registration).
 			$is_registered = wp_script_is( $info['script_name'], 'registered' );
-			$is_enqueued   = wp_script_is( $info['script_name'], 'enqueued' );
+			if ( ! $is_registered ) {
+				return;
+			}
 
-			// Ensure script is enqueued before localizing (wp_localize_script requires the script to be enqueued).
-			if ( ! $is_enqueued && $is_registered ) {
+			// Enqueue script if it's not already enqueued (wp_localize_script requires the script to be enqueued).
+			$is_enqueued = wp_script_is( $info['script_name'], 'enqueued' );
+			if ( ! $is_enqueued ) {
 				wp_enqueue_script( $info['script_name'] );
 			}
 
-			// Ensure script is registered before localizing (wp_localize_script requires registration).
+			// Double-check script is still registered after enqueuing (safety check).
 			$is_registered_after_check = wp_script_is( $info['script_name'], 'registered' );
 			if ( ! $is_registered_after_check ) {
 				return;
@@ -433,12 +459,6 @@ class ScriptData {
 	 * ```
 	 */
 	public static function reset(): void {
-		self::$_script_data = [
-			'scroll'       => [],
-			'sticky'       => [],
-			'animation'    => [],
-			'interactions' => [],
-			'link'         => [],
-		];
+		self::$_script_data = self::DEFAULT_SCRIPT_DATA;
 	}
 }

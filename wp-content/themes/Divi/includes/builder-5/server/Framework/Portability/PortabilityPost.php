@@ -2335,7 +2335,7 @@ class PortabilityPost {
 				do_action( 'divi_visual_builder_before_d4_conversion' );
 
 				// Apply full conversion (includes migration + format conversion).
-				$post_content = Conversion::maybeConvertContent( $post_content );
+				$post_content = Conversion::maybeConvertContent( $post_content, true, null, true );
 			}
 
 			// Prepare preset data for storage before content migrations run.

@@ -25,6 +25,9 @@ class LoopExcerptRenderContext {
 	 * Whether the current render is another post's layout used only for loop excerpt text
 	 * (must not contribute to the host page's styles or Critical CSS collection).
 	 *
+	 * On search, the main post is the first result — not the Theme Builder host — so any
+	 * active loop-excerpt render is always foreign relative to the shared search cache (#50637).
+	 *
 	 * @since ??
 	 *
 	 * @return bool
@@ -38,6 +41,12 @@ class LoopExcerptRenderContext {
 
 		if ( 0 >= $excerpt_post_id ) {
 			return false;
+		}
+
+		// Search hosts share one Static CSS / Dynamic Assets folder; result-row excerpt
+		// renders must never register styles into that shared cache (#50637).
+		if ( is_search() ) {
+			return true;
 		}
 
 		$main_post_id = (int) ET_Post_Stack::get_main_post_id();

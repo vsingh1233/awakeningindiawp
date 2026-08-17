@@ -975,6 +975,12 @@ function et_builder_is_post_type_public( $post_type ) {
  * @return boolean
  */
 function et_builder_should_wrap_styles() {
+	// Search results share one Dynamic Assets cache; do not flip request-wide CPT wrap
+	// from the first result's post type / builder usage (#50637).
+	if ( is_search() ) {
+		return false;
+	}
+
 	static $should_wrap = null;
 
 	if ( null === $should_wrap ) {

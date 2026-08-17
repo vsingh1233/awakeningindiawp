@@ -15,6 +15,8 @@ Follow the anti-nitpicking rules below and the numeric thresholds in
 
 - Maximize **real** feedback. Do not miss regressions, logic flaws, correctness bugs, type unsafety, or contract violations.
 - Be quiet about low-value polish or subjective prefs. If it would not block human review, stay silent.
+- On round 1, maximize completeness: report every independent merge-blocking issue now. Do not stop after one or two findings.
+- On later rounds, maximize restraint: empty findings is success when prior feedback was addressed and the delta is clean. Do not hunt for additional tests, spec maps, or stricter assertions on code that existed in prior rounds.
 - Enforce comment-label caps and comment budgets by PR size.
 - Aggregate by idea, not by line. Combine locations per theme.
 - Drop low-confidence findings. Respect confidence thresholds.
@@ -61,79 +63,23 @@ If the code patch is empty, return summary-only with:
 
 Always run:
 
-- review-change-intent.
-- review-code-clarity.
-- review-correctness.
-- divi-architecture.
-- performance.
-- security.
+- review-change-quality.
+- review-architecture-specs.
+- review-security.
+- review-performance.
+- review-test-quality.
 
 If there are TypeScript code changes, run:
 
-- review-type-quality.
-- review-types-structure.
+- review-types.
 
 Run reviewers based on file types and paths:
 
 - Prefer `code_files` when present. Ignore task files under
 `includes/builder-5/.et/tasks/**`.
-- JS/TS (`*.js`, `*.jsx`, `*.ts`, `*.tsx`):
-review-types-structure, review-type-quality, review-performance,
-review-ux-accessibility.
-- PHP (`*.php`): review-error-handling, review-security, review-performance.
-- UI templates (`*.tsx`, `*.jsx`, `*.php`, `*.html`):
-review-ux-accessibility, review-i18n.
-- i18n assets (`**/i18n/**`, `*.po`, `*.mo`): review-i18n.
-- API/contract paths (`**/api/**`, `**/rest/**`, `**/graphql/**`,
-`**/contracts/**`, `**/types/**`, `**/schema/**`): review-api-contract.
-- Auth/security paths (`**/auth/**`, `**/security/**`,
-`**/permissions/**`): review-security.
-- Data/migrations (`**/migrations/**`, `**/database/**`, `**/schema/**`):
-review-rollout-migration, review-api-contract, review-data-persistence.
-- Tests (`**/__tests__/**`, `*.spec.*`, `*.test.*`): review-test-quality.
-- Dependency files (`package.json`, `yarn.lock`, `package-lock.json`,
-`pnpm-lock.yaml`, `composer.json`, `composer.lock`): review-dependencies.
-- Divi architecture signals (conversion/module/style/global-data paths or
-keywords like `conversion-outline`, `module.json-source`, `d4`, `d5`):
-review-divi-architecture.
-- Spec changes or spec signals (`includes/builder-5/specs/**`, spec keywords):
-review-spec-alignment.
-- Spec map changes (`includes/builder-5/specs/**`): review-spec-map.
-- Bugfix signals (PR title/branch contains "fix", "bug", "hotfix", "patch",
-"regression", or task context references a bug report): review-bugfix-validation.
-- review-docs-manual (public Builder 5 developer docs under
-`includes/builder-5/docs/manual/docs/**`, excluding
-`includes/builder-5/docs/manual/docs/internal/**`):
-  - Include when any changed file falls in that scope (doc edits in the PR).
-  - Also include when nothing in that scope changed, but other
-  `includes/builder-5/**` changes (exclude `.et/tasks/**` and
-  `docs/manual/docs/internal/**`) clearly alter developer-facing behavior,
-  extension APIs, or documented workflows such that the public docs would
-  be wrong or misleading if left unchanged—only with high confidence
-  from paths, summaries, PR title/body, or task context; skip when unsure to
-  avoid noise.
-
-If size is `large` or `huge`, reduce to a high-signal base set:
-review-change-intent, review-correctness, review-security, review-api-contract,
-review-error-handling, review-performance, plus review-dependencies if
-dependency files changed, plus review-docs-manual whenever it would apply
-under the review-docs-manual bullets above (doc paths changed or
-high-confidence “docs should have been updated” signal on code-only changes).
-
-However, always include additional reviewers when signals are present:
-
-- Types/TS: review-type-quality, review-types-structure.
-- UI templates: review-ux-accessibility, review-i18n.
-- Tests: review-test-quality.
-- API/contract paths: review-api-contract.
-- Migrations/schema/data: review-rollout-migration, review-data-persistence.
-- Divi architecture signals: review-divi-architecture.
-- Dependencies: review-dependencies.
-- Specs/spec-map changes: review-spec-alignment, review-spec-map.
-- Bugfix signals: review-bugfix-validation.
-- Builder 5 developer docs (`docs/manual/docs` excluding `internal/`), or
-high-confidence missing public-doc updates on builder-5 code changes:
-review-docs-manual.
+- JS/TS (`*.js`, `*.jsx`, `*.ts`, `*.tsx`): review-types.
+- Data/migrations or attribute persistence signals: review-data-lifecycle.
+- Retro feedback mode: review-retro-feedback.
 
 ## Budget and Confidence Enforcement
 
@@ -154,36 +100,23 @@ review-docs-manual.
 
 ## Reviewers
 
-- review-change-intent
-- review-code-clarity
-- review-correctness
-- review-types-structure
-- review-type-quality
-- review-i18n
-- review-api-contract
-- review-error-handling
+- review-change-quality
+- review-architecture-specs
+- review-types
 - review-security
 - review-performance
-- review-ux-accessibility
 - review-test-quality
-- review-rollout-migration
-- review-data-persistence
-- review-dependencies
-- review-divi-architecture
-- review-spec-map
-- review-spec-alignment
-- review-bugfix-validation
+- review-data-lifecycle
 - review-retro-feedback
-- review-docs-manual
 
 ### Invocation
 
-Invoke reviewers explicitly by subagent name (e.g. `/review-change-intent`).
+Invoke reviewers explicitly by subagent name (e.g. `/review-change-quality`).
 Run selected reviewers in parallel when possible. Provide each reviewer only the
 normalized diff payload and relevant config excerpts. Reviewers may return zero
 findings.
 When `task_context.implementation_plan_excerpt` is available, include it only
-for `review-change-intent` to evaluate scope alignment.
+for `review-change-quality` to evaluate scope alignment.
 
 ## Reviewer Output Contract
 

@@ -68,6 +68,7 @@ class WooCommerceProductGalleryController extends RESTController {
 		// WooCommerce Product Gallery defaults: fullwidth = 'on' (slider), gallery_layout = 'slider'.
 		// When fullwidth = 'off', gallery_layout = 'grid'.
 		$fullwidth = 'slider' === $gallery_layout ? 'on' : 'off';
+		$posts_number = $request->get_param( 'postsNumber' ) ?? 4;
 
 		$args = [
 			'product'                => $product_id,
@@ -80,7 +81,7 @@ class WooCommerceProductGalleryController extends RESTController {
 			'hover_icon_tablet'      => $request->get_param( 'hoverIconTablet' ) ?? '',
 			'hover_icon_phone'       => $request->get_param( 'hoverIconPhone' ) ?? '',
 			'heading_level'          => $request->get_param( 'headingLevel' ) ?? 'h3',
-			'posts_number'           => 4,
+			'posts_number'           => $posts_number,
 		];
 
 		// Get the raw attachment objects (not processed data).
@@ -110,7 +111,7 @@ class WooCommerceProductGalleryController extends RESTController {
 
 		// Prepare rendering arguments for the controller method.
 		$render_args = [
-			'posts_number'           => $args['posts_number'],
+			'posts_number'           => WooCommerceProductGalleryModule::normalize_posts_number( $args['posts_number'] ),
 			'fullwidth'              => $args['fullwidth'],
 			'gallery_layout'         => $args['gallery_layout'],
 			'show_title_and_caption' => $args['show_title_and_caption'],
@@ -175,6 +176,11 @@ class WooCommerceProductGalleryController extends RESTController {
 					if ( empty( $param ) ) {
 						return 'current';
 					}
+
+					if ( 'dynamic' === $param ) {
+						return WooCommerceUtils::get_default_product();
+					}
+
 					return ( 'current' !== $param && 'latest' !== $param ) ? absint( $param ) : $param;
 				},
 				'validate_callback' => function ( $param, $request ) {
@@ -237,6 +243,12 @@ class WooCommerceProductGalleryController extends RESTController {
 				'required'          => false,
 				'default'           => 'h3',
 				'sanitize_callback' => 'sanitize_text_field',
+			],
+			'postsNumber'          => [
+				'type'              => [ 'string', 'integer' ],
+				'required'          => false,
+				'default'           => 4,
+				'sanitize_callback' => 'absint',
 			],
 			'returnInnerOnly'      => [
 				'type'     => 'boolean',

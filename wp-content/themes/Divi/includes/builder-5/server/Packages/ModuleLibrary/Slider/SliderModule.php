@@ -20,6 +20,8 @@ use ET\Builder\Framework\Utility\SanitizerUtility;
 use ET\Builder\FrontEnd\BlockParser\BlockParserStore;
 use ET\Builder\FrontEnd\Module\Style;
 use ET\Builder\Packages\Module\Layout\Components\MultiView\MultiViewScriptData;
+use ET\Builder\FrontEnd\Assets\CriticalCSS;
+use ET\Builder\FrontEnd\Module\ScriptData;
 use ET\Builder\Packages\Module\Module;
 use ET\Builder\Packages\Module\Options\Css\CssStyle;
 use ET\Builder\Packages\Module\Options\Element\ElementClassnames;
@@ -121,6 +123,23 @@ class SliderModule implements DependencyInterface {
 		$elements->script_data(
 			[
 				'attrName' => 'module',
+			]
+		);
+
+		// Register script data for lazy loading.
+		// Pass the order class (selector) so JS can efficiently check if a slider belongs to a below-the-fold module.
+		// The `is_above_the_fold` flag uses the lazy-load fold signal (row-granular) so sliders below the fold
+		// inside a single tall section are detected and deferred correctly.
+		$is_below_the_fold = CriticalCSS::should_generate_critical_css() && CriticalCSS::is_current_module_below_fold_for_lazy_load();
+
+		ScriptData::add_data_item(
+			[
+				'data_name'    => 'slider_lazy_load',
+				'data_item_id' => $id,
+				'data_item'    => [
+					'selector'          => $selector,
+					'is_above_the_fold' => ! $is_below_the_fold,
+				],
 			]
 		);
 

@@ -24,6 +24,7 @@ use ET\Builder\FrontEnd\Assets\DynamicAssetsUtils;
 use ET\Builder\FrontEnd\Module\ScriptData;
 use ET_Core_Cache_Directory;
 use ET_Core_PageResource;
+use Throwable;
 
 /**
  * Dynamic Assets Enqueue class.
@@ -31,6 +32,7 @@ use ET_Core_PageResource;
  * Handles enqueuing scripts and styles for dynamic assets processing.
  *
  * @since ??
+ * @internal Dynamic Assets owns construction and lifecycle registration for this coordinator.
  */
 class DynamicAssetsEnqueue {
 
@@ -84,6 +86,13 @@ class DynamicAssetsEnqueue {
 	private DynamicAssetsDependencyChecker $dependency_checker;
 
 	/**
+	 * Request-scoped integration asset provider collection.
+	 *
+	 * @var IntegrationAssetsProviderCollection
+	 */
+	private IntegrationAssetsProviderCollection $integration_assets_provider_collection;
+
+	/**
 	 * Constructor.
 	 *
 	 * @since ??
@@ -95,6 +104,9 @@ class DynamicAssetsEnqueue {
 	 * @param DynamicAssetsContent           $content            Content handler.
 	 * @param DynamicAssetsDetection         $detection          Detection handler.
 	 * @param DynamicAssetsDependencyChecker $dependency_checker Dependency checker.
+	 * @param IntegrationAssetsProviderCollection|null $integration_assets_provider_collection Optional provider collection. Production
+	 *                                                                                construction supplies the request collection.
+	 *                                                                                Omission creates an empty collection.
 	 */
 	public function __construct(
 		CacheState $cache_state,
@@ -103,7 +115,8 @@ class DynamicAssetsEnqueue {
 		FeatureState $feature_state,
 		DynamicAssetsContent $content,
 		DynamicAssetsDetection $detection,
-		DynamicAssetsDependencyChecker $dependency_checker
+		DynamicAssetsDependencyChecker $dependency_checker,
+		?IntegrationAssetsProviderCollection $integration_assets_provider_collection = null
 	) {
 		$this->cache_state        = $cache_state;
 		$this->detection_state    = $detection_state;
@@ -112,6 +125,7 @@ class DynamicAssetsEnqueue {
 		$this->content            = $content;
 		$this->detection          = $detection;
 		$this->dependency_checker = $dependency_checker;
+		$this->integration_assets_provider_collection = $integration_assets_provider_collection ?? new IntegrationAssetsProviderCollection();
 	}
 
 	/**
@@ -174,10 +188,33 @@ class DynamicAssetsEnqueue {
 				'enqueue_function'   => [ DynamicAssetsUtils::class, 'enqueue_number_counter_script' ],
 				'module_deps'        => [ 'divi/number-counter' ],
 			],
+			'charts'                   => [
+				'enqueue_state_prop' => 'charts',
+				'enqueue_function'   => [ DynamicAssetsUtils::class, 'enqueue_charts_script' ],
+				'module_deps'        => [ 'divi/charts' ],
+			],
 			'contact_form'             => [
 				'enqueue_state_prop' => 'contact_form',
 				'enqueue_function'   => [ DynamicAssetsUtils::class, 'enqueue_contact_form_script' ],
 				'module_deps'        => [ 'divi/contact-form' ],
+			],
+			'post_filter_item'         => [
+				'enqueue_state_prop' => 'post_filter_item',
+				'enqueue_function'   => [ DynamicAssetsUtils::class, 'enqueue_post_filter_item_script' ],
+				'module_deps'        => [
+					'divi/post-filter-item',
+					'divi/post-filter',
+				],
+				'content_contains'   => [
+					'et_pb_post_filter__item-range',
+					'et_pb_post_filter__item-multiple-order',
+				],
+			],
+			'post_filter'              => [
+				'enqueue_state_prop' => 'post_filter',
+				'enqueue_function'   => [ DynamicAssetsUtils::class, 'enqueue_post_filter_script' ],
+				'module_deps'        => [ 'divi/post-filter' ],
+				'content_contains'   => 'data-apply-mode="auto"',
 			],
 			'dropdown'                 => [
 				'enqueue_state_prop' => 'dropdown',
@@ -277,6 +314,31 @@ class DynamicAssetsEnqueue {
 			return;
 		}
 
+		/*
+		 * When JS on demand is disabled (VB app / Preview paths), enqueue without
+		 * use-based module or feature detection so VB detection stays off.
+		 * Still mark enqueue state so early/late passes honor the skip guard and
+		 * do not re-run deregister/register helpers in the same request.
+		 */
+		if ( DynamicAssetsUtils::disable_js_on_demand() ) {
+			/*
+			 * Keep WooCommerce cart scripts dependency-gated in the VB app window.
+			 * Loading them without a cart module can trigger third-party cart refresh
+			 * loops that reload the builder iframe.
+			 */
+			if (
+				'woocommerce_cart_scripts' === $script_key
+				&& Conditions::is_vb_app_window()
+				&& ! $this->dependency_checker->check_for_dependency( $config['module_deps'], $current_modules )
+			) {
+				return;
+			}
+
+			call_user_func( $config['enqueue_function'] );
+			$this->enqueue_state->{$config['enqueue_state_prop']} = true;
+			return;
+		}
+
 		$should_enqueue = false;
 
 		// Check module dependencies if provided.
@@ -285,6 +347,19 @@ class DynamicAssetsEnqueue {
 				$config['module_deps'],
 				$current_modules
 			);
+		}
+
+		// Check rendered markup marker in page content if provided.
+		if ( ! $should_enqueue && ! empty( $config['content_contains'] ) ) {
+			$content         = $this->content->get_all_content();
+			$content_markers = is_array( $config['content_contains'] ) ? $config['content_contains'] : [ $config['content_contains'] ];
+
+			foreach ( $content_markers as $marker ) {
+				if ( ! empty( $content ) && str_contains( $content, $marker ) ) {
+					$should_enqueue = true;
+					break;
+				}
+			}
 		}
 
 		// Check feature detection map (cached value) if provided.
@@ -322,8 +397,19 @@ class DynamicAssetsEnqueue {
 			$this->enqueue_state->{$config['enqueue_state_prop']} = true;
 		}
 
+		$enqueue_flag = $this->enqueue_state->{$config['enqueue_state_prop']};
+
+		/*
+		 * Avoid loading `wc-cart` in VB app window when it was not explicitly required by
+		 * module dependencies. In this context, forcing `wc-cart` via JS-on-demand fallback
+		 * can trigger third-party cart refresh loops and reload the builder iframe.
+		 */
+		if ( 'woocommerce_cart_scripts' === $script_key && Conditions::is_vb_app_window() && ! $enqueue_flag ) {
+			return;
+		}
+
 		// Enqueue script if needed.
-		if ( $this->dependency_checker->should_enqueue( $this->enqueue_state->{$config['enqueue_state_prop']} ) ) {
+		if ( $this->dependency_checker->should_enqueue( $enqueue_flag ) ) {
 			call_user_func( $config['enqueue_function'] );
 		}
 	}
@@ -614,11 +700,182 @@ class DynamicAssetsEnqueue {
 	}
 
 	/**
+	 * Whether dynamic script enqueue may run for this request.
+	 *
+	 * Generation-off FE requests stay blocked (#50848). Preview / Customizer and
+	 * the VB app window are allowed so scripts can enqueue without detection.
+	 * Detection, CSS, and cache generation remain gated elsewhere
+	 * (`should_initiate_dynamic_assets` / `should_generate_dynamic_assets`).
+	 *
+	 * @since ??
+	 *
+	 * @return bool
+	 */
+	private function _may_enqueue_dynamic_scripts(): bool {
+		if ( DynamicAssetsUtils::should_generate_dynamic_assets() ) {
+			return true;
+		}
+
+		// Theme Customizer and Preview keep script enqueue when generation is off.
+		if ( is_customize_preview() || is_preview() || is_et_pb_preview() ) {
+			return true;
+		}
+
+		// VB app window: enqueue scripts only; keep calculation/CSS/cache off.
+		if ( Conditions::is_vb_app_window() ) {
+			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Coordinate frontend integration/plugin asset enqueue through Dynamic Assets ownership.
+	 *
+	 * Dynamic Assets owns early/late detection timing and content assembly. Integrations retain
+	 * ownership of selecting and enqueueing their own plugin/add-on assets from supplied content.
+	 *
+	 * Visual Builder windows are skipped because the top window is only the builder shell and the
+	 * app/canvas window relies on preview-route style injection instead of pre-head asset enqueue.
+	 *
+	 * @since ??
+	 *
+	 * @param string $request_type Whether this is the early or late pass.
+	 *
+	 * @return void
+	 */
+	private function _maybe_enqueue_frontend_integration_resources( string $request_type = 'early' ): void {
+		if ( Conditions::is_vb_top_window() ) {
+			return;
+		}
+
+		if ( Conditions::is_vb_app_window() ) {
+			return;
+		}
+
+		$available_providers = $this->integration_assets_provider_collection->get_available_providers();
+
+		if ( [] === $available_providers ) {
+			return;
+		}
+
+		$content = $this->_get_frontend_integration_enqueue_content( $request_type );
+
+		if ( '' === $content ) {
+			return;
+		}
+
+		$context = new IntegrationAssetsContext( $content, $request_type );
+
+		foreach ( $available_providers as $provider_id => $provider ) {
+			try {
+				$provider->enqueue( $context );
+			} catch ( Throwable $error ) {
+				$this->integration_assets_provider_collection->disable( $provider_id );
+
+				_doing_it_wrong(
+					__METHOD__,
+					sprintf(
+						// Translators: 1: integration provider ID; 2: request phase; 3: exception class.
+						esc_html__( 'Integration asset provider "%1$s" failed during the %2$s pass and was disabled for this request (%3$s).', 'et_builder_5' ),
+						esc_html( $provider_id ),
+						esc_html( $request_type ),
+						esc_html( get_class( $error ) )
+					),
+					'5.11.0'
+				);
+			}
+		}
+	}
+
+	/**
+	 * Assemble frontend integration content input from Dynamic Assets-owned state.
+	 *
+	 * Early pass: ordinary requests return `DynamicAssetsContent::get_all_content()` directly. Special
+	 * and non-singular requests additionally inspect applicable Theme Builder layouts; archive, home,
+	 * and search requests additionally inspect main-query posts not already represented in DA content.
+	 * Late pass uses only genuine `late_block_content` and returns immediately when it is empty so it
+	 * never reconsiders early-only sources.
+	 *
+	 * @since ??
+	 *
+	 * @param string $request_type Whether this is the early or late pass.
+	 *
+	 * @return string
+	 */
+	private function _get_frontend_integration_enqueue_content( string $request_type ): string {
+		if ( 'late' === $request_type ) {
+			return $this->detection_state->late_block_content;
+		}
+
+		$content_sources = [];
+		$all_content     = $this->content->get_all_content();
+
+		if ( '' !== $all_content ) {
+			$content_sources[] = $all_content;
+		}
+
+		$is_404_or_archive = is_404() || is_archive();
+		$is_query_index    = is_archive() || is_home() || is_search();
+
+		/*
+		 * DA content already represents every ordinary singular request. Only special/non-singular
+		 * contexts can omit override-only layouts or main-query posts, so return before walking either
+		 * source regardless of whether all-content contains a direct integration marker.
+		 */
+		if ( ! $is_404_or_archive && ! $is_query_index ) {
+			return $all_content;
+		}
+
+		/*
+		 * On special/non-singular requests, active Theme Builder layouts may be absent from assembled DA
+		 * content. The template ID helper also includes disabled override-only layouts for 404/archive.
+		 * Read applicable layout content so frontend integration assets remain pre-head, including when
+		 * generation is disabled and cache-state template IDs were never initialized.
+		 */
+		foreach ( DynamicAssetsUtils::get_theme_builder_template_ids() as $template_id ) {
+			$template_post    = get_post( (int) $template_id );
+			$template_content = $template_post instanceof \WP_Post ? (string) $template_post->post_content : '';
+
+			if ( '' !== $template_content && ! str_contains( $all_content, $template_content ) ) {
+				$content_sources[] = $template_content;
+			}
+		}
+
+		if ( $is_query_index ) {
+			global $wp_query;
+
+			// DA's non-singular content may omit posts an archive/blog/search index will render.
+			if ( isset( $wp_query->posts ) && is_array( $wp_query->posts ) ) {
+				foreach ( $wp_query->posts as $queried_post ) {
+					$queried_content = $queried_post instanceof \WP_Post ? (string) $queried_post->post_content : '';
+
+					if ( '' !== $queried_content && ! str_contains( $all_content, $queried_content ) ) {
+						$content_sources[] = $queried_content;
+					}
+				}
+			}
+		}
+
+		return implode( "\n", $content_sources );
+	}
+
+	/**
 	 * Enqueue early dynamic JavaScript files.
 	 *
 	 * @since ??
 	 */
 	public function enqueue_dynamic_scripts_early(): void {
+		/*
+		 * `_may_enqueue_dynamic_scripts()` blocks normal generation-disabled frontend requests.
+		 * `pre_initial_setup()` still assembles DA content in that case, so frontend integration assets
+		 * remain coordinated here before the gate returns.
+		 */
+		if ( ! $this->_may_enqueue_dynamic_scripts() ) {
+			$this->_maybe_enqueue_frontend_integration_resources( 'early' );
+			return;
+		}
+
 		$this->enqueue_dynamic_scripts();
 	}
 
@@ -629,12 +886,18 @@ class DynamicAssetsEnqueue {
 	 */
 	public function enqueue_dynamic_scripts_late(): void {
 		// Skip processing for non-content requests (static files, etc.).
-		// However, allow script enqueuing in Theme Customizer and Preview mode
-		// even though dynamic asset generation is disabled in these contexts.
+		// However, allow script enqueuing in Theme Customizer, Preview, and VB
+		// app window even though dynamic asset generation is disabled there.
 		$is_preview_mode    = is_customize_preview() || is_preview() || is_et_pb_preview();
+		$is_vb_app_window   = Conditions::is_vb_app_window();
 		$is_dynamic_request = DynamicAssetsUtils::is_dynamic_front_end_request();
 
-		if ( ! $is_dynamic_request && ! $is_preview_mode ) {
+		if ( ! $is_dynamic_request && ! $is_preview_mode && ! $is_vb_app_window ) {
+			return;
+		}
+
+		if ( ! $this->_may_enqueue_dynamic_scripts() ) {
+			$this->_maybe_enqueue_frontend_integration_resources( 'late' );
 			return;
 		}
 
@@ -649,6 +912,16 @@ class DynamicAssetsEnqueue {
 	 * @param string $request_type whether early or late request.
 	 */
 	public function enqueue_dynamic_scripts( string $request_type = 'early' ): void {
+		if ( ! in_array( $request_type, [ IntegrationAssetsContext::PHASE_EARLY, IntegrationAssetsContext::PHASE_LATE ], true ) ) {
+			_doing_it_wrong(
+				__METHOD__,
+				esc_html__( 'Dynamic Assets scripts can only be enqueued for the "early" or "late" phase.', 'et_builder_5' ),
+				'5.11.0'
+			);
+
+			return;
+		}
+
 		// Dynamic frontend scripts are not required in the VB top window.
 		if ( Conditions::is_vb_top_window() ) {
 			return;
@@ -659,11 +932,18 @@ class DynamicAssetsEnqueue {
 		}
 
 		// Ensure _presets_feaure_used is set before late detection checks.
-		if ( 'late' === $request_type && empty( $this->feature_state->presets_feature_used ) ) {
+		// Skip content probes when JS on demand is disabled (VB app / Preview).
+		if (
+			'late' === $request_type
+			&& empty( $this->feature_state->presets_feature_used )
+			&& ! DynamicAssetsUtils::disable_js_on_demand()
+		) {
 			$this->feature_state->presets_feature_used = $this->detection->presets_feature_used( $this->content->get_all_content() );
 		}
 
 		$current_modules = 'late' === $request_type ? $this->detection_state->all_modules : $this->detection_state->early_modules;
+
+		$this->_maybe_enqueue_frontend_integration_resources( $request_type );
 
 		// Handle comments script.
 		if ( ! $this->enqueue_state->comments ) {
@@ -755,6 +1035,30 @@ class DynamicAssetsEnqueue {
 			}
 		}
 
+		// Handle video lazy load script.
+		// Only the dependency state is latched here; the actual script enqueue is
+		// deferred to the late phase and gated on real below-the-fold presence
+		// (see `has_below_fold_script_data_item`) so pages with only above-the-fold
+		// videos don't pay the helper-script overhead.
+		if ( ! $this->enqueue_state->video_lazy_load ) {
+			$video_lazy_load_deps = [
+				'divi/video',
+				'divi/video-slider',
+			];
+
+			$this->enqueue_state->video_lazy_load = $this->dependency_checker->check_for_dependency( $video_lazy_load_deps, $current_modules );
+		}
+
+		// Handle map lazy load script data.
+		if ( ! $this->enqueue_state->map_lazy_load ) {
+			$map_lazy_load_deps = [
+				'divi/map',
+				'divi/fullwidth-map',
+			];
+
+			$this->enqueue_state->map_lazy_load = $this->dependency_checker->check_for_dependency( $map_lazy_load_deps, $current_modules );
+		}
+
 		// Handle search module script.
 		if ( ! $this->enqueue_state->search ) {
 			$search_deps = [
@@ -822,11 +1126,13 @@ class DynamicAssetsEnqueue {
 
 		// Handle fullscreen section script.
 		if ( ! $this->enqueue_state->fullscreen_section ) {
-			$this->enqueue_state->fullscreen_section = $this->detection->get_cached_or_detect_feature(
-				'fullscreen_section_enabled',
-				[ DetectFeature::class, 'has_fullscreen_section_enabled' ],
-				[ $this->content->get_all_content(), $this->detection_state->options ]
-			);
+			if ( ! DynamicAssetsUtils::disable_js_on_demand() ) {
+				$this->enqueue_state->fullscreen_section = $this->detection->get_cached_or_detect_feature(
+					'fullscreen_section_enabled',
+					[ DetectFeature::class, 'has_fullscreen_section_enabled' ],
+					[ $this->content->get_all_content(), $this->detection_state->options ]
+				);
+			}
 
 			if ( $this->dependency_checker->should_enqueue( $this->enqueue_state->fullscreen_section ) ) {
 				DynamicAssetsUtils::enqueue_fullscreen_section_script();
@@ -835,11 +1141,13 @@ class DynamicAssetsEnqueue {
 
 		// Handle section divider script.
 		if ( ! $this->enqueue_state->section_dividers ) {
-			$this->enqueue_state->section_dividers = $this->detection->get_cached_or_detect_feature(
-				'section_dividers_enabled',
-				[ DetectFeature::class, 'has_section_dividers_enabled' ],
-				[ $this->content->get_all_content(), $this->detection_state->options ]
-			);
+			if ( ! DynamicAssetsUtils::disable_js_on_demand() ) {
+				$this->enqueue_state->section_dividers = $this->detection->get_cached_or_detect_feature(
+					'section_dividers_enabled',
+					[ DetectFeature::class, 'has_section_dividers_enabled' ],
+					[ $this->content->get_all_content(), $this->detection_state->options ]
+				);
+			}
 
 			if ( $this->dependency_checker->should_enqueue( $this->enqueue_state->section_dividers ) ) {
 				DynamicAssetsUtils::enqueue_section_dividers_script();
@@ -1056,7 +1364,9 @@ class DynamicAssetsEnqueue {
 
 		// Handle salvattore script - only for D4 shortcodes with block mode enabled.
 		if ( ! $this->enqueue_state->salvattore ) {
-			$this->enqueue_state->salvattore = $this->detection->should_enqueue_salvattore_for_shortcodes();
+			if ( ! DynamicAssetsUtils::disable_js_on_demand() ) {
+				$this->enqueue_state->salvattore = $this->detection->should_enqueue_salvattore_for_shortcodes();
+			}
 
 			if ( $this->dependency_checker->should_enqueue( $this->enqueue_state->salvattore ) ) {
 				DynamicAssetsUtils::enqueue_salvattore_script();
@@ -1065,12 +1375,13 @@ class DynamicAssetsEnqueue {
 
 		// Handle split testing script.
 		if ( ! $this->enqueue_state->split_testing ) {
-
-			$this->enqueue_state->split_testing = $this->detection->get_cached_or_detect_feature(
-				'split_testing_enabled',
-				[ DetectFeature::class, 'has_split_testing_enabled' ],
-				[ $this->content->get_all_content(), $this->detection_state->options ]
-			);
+			if ( ! DynamicAssetsUtils::disable_js_on_demand() ) {
+				$this->enqueue_state->split_testing = $this->detection->get_cached_or_detect_feature(
+					'split_testing_enabled',
+					[ DetectFeature::class, 'has_split_testing_enabled' ],
+					[ $this->content->get_all_content(), $this->detection_state->options ]
+				);
+			}
 
 			if ( $this->dependency_checker->should_enqueue( $this->enqueue_state->split_testing ) ) {
 				DynamicAssetsUtils::enqueue_split_testing_script();
@@ -1078,6 +1389,13 @@ class DynamicAssetsEnqueue {
 		}
 
 		// Handle Google Maps script.
+		// Detection is latched (run once per request), but the enqueue decision must
+		// run in both phases: the early phase handles the JS-on-demand-disabled
+		// backward-compat fallback, and the late phase reads `map_lazy_load` script
+		// data (only available after modules render) to enqueue for above-the-fold
+		// maps. Gating the enqueue decision on `! enqueue_state->google_maps` would
+		// latch the early-phase result and prevent the late-phase above-the-fold
+		// check from ever running, leaving above-the-fold maps without the script.
 		if ( ! $this->enqueue_state->google_maps ) {
 			$google_maps_deps = [
 				'divi/map',
@@ -1085,10 +1403,48 @@ class DynamicAssetsEnqueue {
 			];
 
 			$this->enqueue_state->google_maps = $this->dependency_checker->check_for_dependency( $google_maps_deps, $current_modules );
+		}
 
-			if ( ( et_pb_enqueue_google_maps_script() && $this->enqueue_state->google_maps ) || ( et_pb_enqueue_google_maps_script() && DynamicAssetsUtils::disable_js_on_demand() ) ) {
-				DynamicAssetsUtils::enqueue_google_maps_script();
+		// Check if we should enqueue Google Maps script.
+		// Only enqueue if:
+		// 1. Maps are detected AND at least one map is above the fold (in late phase), OR
+		// 2. JS on demand is disabled (backward compatibility).
+		$should_enqueue_google_maps = false;
+
+		if ( $this->enqueue_state->google_maps && et_pb_enqueue_google_maps_script() ) {
+			// Only check script data in late phase (after modules render and script data is available).
+			// In early phase, skip enqueuing - let late phase handle it after checking script data.
+			if ( 'late' === $request_type ) {
+				$map_lazy_load_data = ScriptData::get_data( 'map_lazy_load' );
+				$has_above_fold_map = false;
+
+				// Check if any map is above the fold.
+				if ( ! empty( $map_lazy_load_data ) ) {
+					foreach ( $map_lazy_load_data as $map_data ) {
+						if ( ! empty( $map_data['is_above_the_fold'] ) ) {
+							$has_above_fold_map = true;
+							break;
+						}
+					}
+				}
+
+				// Only enqueue if at least one map is above the fold.
+				// Below-fold maps will load the script dynamically via lazy loading.
+				$should_enqueue_google_maps = $has_above_fold_map;
 			}
+			// Early phase: Skip enqueuing - script data not available yet.
+			// Late phase will check script data and enqueue if needed.
+		}
+
+		// Also enqueue if JS on demand is disabled (backward compatibility).
+		if ( ! $should_enqueue_google_maps && et_pb_enqueue_google_maps_script() && DynamicAssetsUtils::disable_js_on_demand() ) {
+			$should_enqueue_google_maps = true;
+		}
+
+		if ( $should_enqueue_google_maps ) {
+			DynamicAssetsUtils::enqueue_google_maps_script();
+			// Latch the helper run so later passes do not re-enqueue in the same request.
+			$this->enqueue_state->google_maps = true;
 		}
 
 		// Enqueue all scripts using unified system (works in both early and late phases).
@@ -1146,8 +1502,30 @@ class DynamicAssetsEnqueue {
 				ScriptData::enqueue_data( 'number_counter' );
 			}
 
+			if ( $this->dependency_checker->should_enqueue( $this->enqueue_state->charts ) ) {
+				ScriptData::enqueue_data( 'charts' );
+			}
+
 			if ( $this->dependency_checker->should_enqueue( $this->enqueue_state->woocommerce_cart_totals ) ) {
 				ScriptData::enqueue_data( 'woocommerce_cart_totals' );
+			}
+
+			if ( $this->dependency_checker->should_enqueue( $this->enqueue_state->video_lazy_load ) && $this->has_below_fold_script_data_item( 'video_lazy_load' ) ) {
+				// Ensure script is enqueued before localizing script data.
+				DynamicAssetsUtils::enqueue_video_lazy_load_script();
+				ScriptData::enqueue_data( 'video_lazy_load' );
+			}
+
+			// Enqueue map lazy load script data if present and at least one map is below the fold.
+			if ( $this->dependency_checker->should_enqueue( $this->enqueue_state->map_lazy_load ) && $this->has_below_fold_script_data_item( 'map_lazy_load' ) ) {
+				ScriptData::enqueue_data( 'map_lazy_load' );
+			}
+
+			// Enqueue slider lazy load script data if slider modules are present and at least one is below the fold.
+			// The slider script itself is already enqueued via the slider dependency detection.
+			if ( ( $this->dependency_checker->should_enqueue( $this->enqueue_state->slider ) ||
+				$this->dependency_checker->should_enqueue( $this->enqueue_state->video_slider ) ) && $this->has_below_fold_script_data_item( 'slider_lazy_load' ) ) {
+				ScriptData::enqueue_data( 'slider_lazy_load' );
 			}
 
 			if ( $this->dependency_checker->should_enqueue( $this->enqueue_state->signup ) ) {
@@ -1191,6 +1569,38 @@ class DynamicAssetsEnqueue {
 				wp_enqueue_script( $combined_script_handle );
 			}
 		}
+	}
+
+
+	/**
+	 * Check whether a lazy-load script data collection has at least one
+	 * below-the-fold item.
+	 *
+	 * Used to gate lazy-load helper script/data enqueuing so the overhead is
+	 * only paid when there is actually something to defer. An item is considered
+	 * below the fold when its `is_above_the_fold` flag is empty/falsy (items
+	 * without the flag, e.g. video items added only when deferred, count as BTF).
+	 *
+	 * @since ??
+	 *
+	 * @param string $data_name Script data name (e.g. 'video_lazy_load').
+	 *
+	 * @return bool
+	 */
+	protected function has_below_fold_script_data_item( string $data_name ): bool {
+		$data = ScriptData::get_data( $data_name );
+
+		if ( empty( $data ) ) {
+			return false;
+		}
+
+		foreach ( $data as $item ) {
+			if ( empty( $item['is_above_the_fold'] ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 

@@ -502,8 +502,8 @@ class TransitionStyle {
 				'body'  => '', // This means `body` doesn't have sub-selectors and use the base selector directly.
 				'link'  => 'a',
 				'quote' => 'blockquote',
-				'ul'    => 'ul li',
-				'ol'    => 'ol li',
+				'ul'    => 'ul > li',
+				'ol'    => 'ol > li',
 			];
 		} elseif ( 'headingFont' === $prop_key ) {
 			// The list of sub-selectors ref for `headingFont` based on `subSelector` defined in `FontHeaderStyle` class.

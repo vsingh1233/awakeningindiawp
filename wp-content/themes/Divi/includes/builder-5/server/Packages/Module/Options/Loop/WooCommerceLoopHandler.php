@@ -77,6 +77,10 @@ class WooCommerceLoopHandler {
 			'custom' => 'get_formatted_date',
 			'escape' => 'esc_html',
 		],
+		'loop_product_post_modified_date'  => [
+			'custom' => 'get_formatted_modified_date',
+			'escape' => 'esc_html',
+		],
 		'loop_product_post_featured_image' => [
 			'custom' => 'get_featured_image_url',
 			'escape' => 'esc_url',
@@ -325,6 +329,10 @@ class WooCommerceLoopHandler {
 		switch ( $method ) {
 			case 'get_formatted_date':
 				$date = $product->get_date_created();
+				return ModuleUtils::format_date( $date, $settings );
+
+			case 'get_formatted_modified_date':
+				$date = $product->get_date_modified();
 				return ModuleUtils::format_date( $date, $settings );
 
 			case 'get_featured_image_url':

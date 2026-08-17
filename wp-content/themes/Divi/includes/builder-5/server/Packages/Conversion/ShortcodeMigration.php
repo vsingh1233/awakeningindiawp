@@ -115,10 +115,12 @@ class ShortcodeMigration {
 	 *
 	 * @param string $content The content to parse.
 	 * @param string $parent_address The address of the parent shortcode.
+	 * @param string $remaining_content The non-shortcode residue that remains after parsing.
+	 * @param bool   $preserve_mixed_content_nodes Whether mixed shortcode+raw content should be represented as parsed nodes plus raw segments.
 	 *
 	 * @return array
 	 */
-	public static function process_shortcode( string $content, string $parent_address = '' ): array {
+	public static function process_shortcode( string $content, string $parent_address = '', ?string &$remaining_content = null, bool $preserve_mixed_content_nodes = false ): array {
 		// Regex101 link: https://regex101.com/r/Nolw0Z/4.
 		// Updated to allow hyphens in shortcode names (WordPress standard).
 		$pattern = '/^\[([a-zA-Z0-9_-]+)(.*?)(\/)?](?:(.*?)\[\/\1])?/s';
@@ -147,18 +149,30 @@ class ShortcodeMigration {
 			);
 
 			// If not self-closing, recursively parse inner content for nested shortcodes.
-			$parsed_inner = null;
+			$parsed_inner            = null;
+			$remaining_inner_content = '';
 			if ( ! $self_closing && ! empty( $inner_content ) ) {
-				$parsed_inner = self::process_shortcode( $inner_content, $current_address );
+				$parsed_inner = self::process_shortcode( $inner_content, $current_address, $remaining_inner_content, $preserve_mixed_content_nodes );
 			}
-
-			$parsed_inner_count = is_array( $parsed_inner ) ? count( $parsed_inner ) : 0;
-			$has_mixed_content  = 0 < $parsed_inner_count && self::has_non_shortcode_content( $inner_content );
 
 			$content_value = null;
 			if ( ! $self_closing ) {
-				$should_use_parsed_inner = ! empty( $parsed_inner ) && ! $has_mixed_content;
-				$content_value           = $should_use_parsed_inner ? $parsed_inner : $inner_content;
+				$parsed_inner_count = is_array( $parsed_inner ) ? count( $parsed_inner ) : 0;
+				$has_mixed_content  = 0 < $parsed_inner_count && self::has_non_shortcode_content( $remaining_inner_content );
+				$should_use_parsed_inner = ! empty( $parsed_inner ) && ( ! $has_mixed_content || $preserve_mixed_content_nodes );
+
+				if ( $should_use_parsed_inner ) {
+					$content_value = $parsed_inner;
+				} else {
+					$content_value = $inner_content;
+				}
+
+				if ( $preserve_mixed_content_nodes && is_array( $content_value ) && '' !== $remaining_inner_content ) {
+					$content_value[] = [
+						'is_raw'  => true,
+						'content' => $remaining_inner_content,
+					];
+				}
 			}
 
 			$result[] = [
@@ -173,6 +187,8 @@ class ShortcodeMigration {
 
 			++$index;
 		}
+
+		$remaining_content = $content;
 
 		return $result;
 	}
@@ -317,15 +333,35 @@ class ShortcodeMigration {
 		$result = '';
 
 		foreach ( $shortcodes as $shortcode ) {
+			if ( ! empty( $shortcode['is_raw'] ) ) {
+				$result .= (string) ( $shortcode['content'] ?? '' );
+				continue;
+			}
+
 			$name            = $shortcode['name'];
 			$attributes      = $shortcode['attributes'] ?? [];
 			$content         = $shortcode['content'] ?? null;
 			$address         = $shortcode['address'] ?? '';
 			$self_closing    = $shortcode['self_closing'] ?? false;
 			$has_closing_tag = $shortcode['has_closing_tag'] ?? false;
+			$content_for_filters = $content;
+
+			// Keep migration callbacks compatible with legacy shortcode node arrays.
+			// Raw passthrough segments are serializer-only artifacts and should not be
+			// interpreted as shortcode nodes by attribute migration logic.
+			if ( is_array( $content_for_filters ) ) {
+				$content_for_filters = array_values(
+					array_filter(
+						$content_for_filters,
+						function ( $item ) {
+							return ! ( is_array( $item ) && ! empty( $item['is_raw'] ) );
+						}
+					)
+				);
+			}
 
 			// Apply filters to migrate attributes.
-			$migrated_attributes = apply_filters( 'et_pb_module_shortcode_attributes', $attributes, $attributes, $name, $address, $content, $maybe_global_presets_migration );
+			$migrated_attributes = apply_filters( 'et_pb_module_shortcode_attributes', $attributes, $attributes, $name, $address, $content_for_filters, $maybe_global_presets_migration );
 
 			// Serialize attributes.
 			$atts = '';
@@ -458,7 +494,8 @@ class ShortcodeMigration {
 		ET_Global_Settings::init();
 		ET_Builder_Module_Settings_Migration::init();
 
-		$parsed_shortcodes     = self::process_shortcode( $shortcode );
+		$remaining_content     = null;
+		$parsed_shortcodes     = self::process_shortcode( $shortcode, '', $remaining_content, true );
 		$serialized_shortcodes = self::process_to_shortcode( $parsed_shortcodes, $maybe_global_presets_migration );
 
 		remove_filter( 'et_pb_should_handle_migration_pre', [ self::class, 'should_handle_migration' ], 10 );

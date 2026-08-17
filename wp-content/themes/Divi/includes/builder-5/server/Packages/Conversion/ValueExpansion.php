@@ -50,6 +50,38 @@ class ValueExpansion {
 	}
 
 	/**
+	 * Convert Body Font.
+	 *
+	 * Wraps the standard font conversion and ensures that when D4 Regular weight
+	 * is converted, an explicit weight of '400' is set to prevent fallback to
+	 * module default weights.
+	 *
+	 * @since ??
+	 *
+	 * @param string $value D4 font value string (pipe-separated).
+	 * @param array  $extra_params Additional parameters including attrs, desktopName, etc.
+	 *
+	 * @return array The expanded font values with weight guaranteed to be set.
+	 */
+	public static function convertBodyFont( $value, $extra_params ) {
+		// Call the original convertFont to get base expansion.
+		$expanded = AdvancedOptionConversion::convertFont( $value );
+
+		// Ensure we always return an array.
+		if ( ! is_array( $expanded ) ) {
+			$expanded = [];
+		}
+
+		// D4 Regular body font can resolve to an expanded font object without weight.
+		// Ensure migration writes explicit regular weight instead of falling back to module default.
+		if ( ! isset( $expanded['weight'] ) ) {
+			$expanded['weight'] = '400';
+		}
+
+		return $expanded;
+	}
+
+	/**
 	 * Convert Icon.
 	 *
 	 * Creates an object from the expanded value of the icon attribute.
@@ -687,6 +719,31 @@ class ValueExpansion {
 
 		// Invert valid D4 values, preserve invalid ones for data integrity.
 		return $conversion_map[ $value ] ?? $value;
+	}
+
+	/**
+	 * Convert Toggle title_text_color only when closed_toggle_text_color is absent.
+	 *
+	 * @since ??
+	 *
+	 * @param string $value Original D4 title_text_color value.
+	 * @param array  $extra_params {
+	 *   Additional conversion context.
+	 *
+	 *   @type array $attrs Raw D4 shortcode attributes.
+	 * }
+	 *
+	 * @return string|WP_Error Converted value or WP_Error when conversion should be skipped.
+	 */
+	public static function convertToggleTitleTextColor( string $value, array $extra_params ) {
+		$attrs                    = $extra_params['attrs'] ?? [];
+		$closed_toggle_text_color = $attrs['closed_toggle_text_color'] ?? '';
+
+		if ( is_string( $closed_toggle_text_color ) && '' !== trim( $closed_toggle_text_color ) ) {
+			return new WP_Error( 'skip_title_text_color_mapping', 'closed_toggle_text_color already exists.' );
+		}
+
+		return $value;
 	}
 
 	/**

@@ -184,6 +184,20 @@ const migrate = (db) => {
       ON cluster_members(cluster_id);
     CREATE INDEX IF NOT EXISTS idx_cluster_members_comment
       ON cluster_members(comment_id);
+
+    CREATE TABLE IF NOT EXISTS comment_tags (
+      id INTEGER PRIMARY KEY,
+      comment_id INTEGER NOT NULL,
+      tag VARCHAR(128) NOT NULL,
+      source VARCHAR(32) NOT NULL,
+      UNIQUE (comment_id, tag),
+      FOREIGN KEY (comment_id) REFERENCES comments(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_comment_tags_comment
+      ON comment_tags(comment_id);
+    CREATE INDEX IF NOT EXISTS idx_comment_tags_tag
+      ON comment_tags(tag);
   `);
 
   ensureColumn(db, {
@@ -221,6 +235,46 @@ const migrate = (db) => {
     column: "cluster_id",
     definition: "INTEGER",
   });
+  ensureColumn(db, {
+    table: "prs",
+    column: "body",
+    definition: "TEXT",
+  });
+  ensureColumn(db, {
+    table: "prs",
+    column: "body_summary",
+    definition: "TEXT",
+  });
+  ensureColumn(db, {
+    table: "comments",
+    column: "normalized_claim",
+    definition: "TEXT",
+  });
+  ensureColumn(db, {
+    table: "comments",
+    column: "normalized_kind",
+    definition: "VARCHAR(64)",
+  });
+  ensureColumn(db, {
+    table: "comments",
+    column: "normalized_signal",
+    definition: "VARCHAR(32)",
+  });
+  ensureColumn(db, {
+    table: "comments",
+    column: "reviewer_hint",
+    definition: "VARCHAR(255)",
+  });
+  ensureColumn(db, {
+    table: "comments",
+    column: "normalized_json",
+    definition: "TEXT",
+  });
+  ensureColumn(db, {
+    table: "clusters",
+    column: "tags_json",
+    definition: "TEXT",
+  });
 };
 
 const openDb = ({ repoRoot, dbPath }) => {
@@ -244,6 +298,10 @@ const loadVectorExtension = (db, extensionPath, entrypoint) => {
 };
 
 const upsertPr = (db, pr) => {
+  const payload = {
+    ...pr,
+    body: pr.body ?? null,
+  };
   const stmt = db.prepare(`
     INSERT INTO prs (
       repo,
@@ -256,7 +314,8 @@ const upsertPr = (db, pr) => {
       merged_at,
       closed_at,
       created_at,
-      updated_at
+      updated_at,
+      body
     ) VALUES (
       @repo,
       @number,
@@ -268,7 +327,8 @@ const upsertPr = (db, pr) => {
       @merged_at,
       @closed_at,
       @created_at,
-      @updated_at
+      @updated_at,
+      @body
     )
     ON CONFLICT(repo, number) DO UPDATE SET
       title = excluded.title,
@@ -279,12 +339,13 @@ const upsertPr = (db, pr) => {
       merged_at = excluded.merged_at,
       closed_at = excluded.closed_at,
       created_at = excluded.created_at,
-      updated_at = excluded.updated_at
+      updated_at = excluded.updated_at,
+      body = COALESCE(excluded.body, prs.body)
   `);
-  stmt.run(pr);
+  stmt.run(payload);
   return db
     .prepare("SELECT id FROM prs WHERE repo = ? AND number = ?")
-    .get(pr.repo, pr.number)?.id;
+    .get(payload.repo, payload.number)?.id;
 };
 
 const upsertComment = (db, comment) => {
@@ -397,6 +458,74 @@ const upsertComment = (db, comment) => {
     .get(comment.hash)?.id;
 };
 
+const updatePrBodySummary = (db, { prId, bodySummary }) => {
+  db.prepare(
+    `
+      UPDATE prs
+      SET body_summary = @body_summary
+      WHERE id = @pr_id
+    `
+  ).run({
+    pr_id: prId,
+    body_summary: bodySummary,
+  });
+};
+
+const updateCommentNormalization = (db, payload) => {
+  db.prepare(
+    `
+      UPDATE comments
+      SET
+        normalized_claim = @normalized_claim,
+        normalized_kind = @normalized_kind,
+        normalized_signal = @normalized_signal,
+        reviewer_hint = @reviewer_hint,
+        normalized_json = @normalized_json
+      WHERE id = @id
+    `
+  ).run(payload);
+};
+
+const replaceCommentTags = (db, { commentId, tags }) => {
+  db.prepare("DELETE FROM comment_tags WHERE comment_id = ?").run(commentId);
+  const insert = db.prepare(`
+    INSERT INTO comment_tags (
+      comment_id,
+      tag,
+      source
+    ) VALUES (
+      @comment_id,
+      @tag,
+      @source
+    )
+    ON CONFLICT(comment_id, tag) DO UPDATE SET
+      source = excluded.source
+  `);
+  (tags || []).forEach((entry) => {
+    if (null == entry?.tag || "" === String(entry.tag).trim()) {
+      return;
+    }
+    insert.run({
+      comment_id: commentId,
+      tag: String(entry.tag).trim(),
+      source: entry.source || "nano",
+    });
+  });
+};
+
+const updateClusterTags = (db, { clusterId, tagsJson }) => {
+  db.prepare(
+    `
+      UPDATE clusters
+      SET tags_json = @tags_json
+      WHERE id = @cluster_id
+    `
+  ).run({
+    cluster_id: clusterId,
+    tags_json: tagsJson,
+  });
+};
+
 const insertFinding = (db, finding) => {
   const stmt = db.prepare(`
     INSERT INTO findings (
@@ -499,6 +628,7 @@ const getStats = (db) => {
     "cluster_runs",
     "clusters",
     "cluster_members",
+    "comment_tags",
   ];
   const stats = {};
   tables.forEach((table) => {
@@ -514,6 +644,10 @@ export {
   loadVectorExtension,
   upsertPr,
   upsertComment,
+  updatePrBodySummary,
+  updateCommentNormalization,
+  replaceCommentTags,
+  updateClusterTags,
   insertFinding,
   insertDecision,
   insertPatch,

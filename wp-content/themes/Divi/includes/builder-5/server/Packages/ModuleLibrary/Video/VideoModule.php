@@ -26,12 +26,14 @@ use ET\Builder\Packages\Module\Module;
 use ET\Builder\Packages\Module\Options\Css\CssStyle;
 use ET\Builder\Packages\Module\Options\Element\ElementClassnames;
 use ET\Builder\Packages\ModuleLibrary\ModuleRegistration;
+use ET\Builder\Packages\ModuleLibrary\Video\VideoUtils;
+use ET\Builder\Packages\ModuleUtils\ModuleUtils;
 use ET\Builder\Packages\ModuleUtils\ChildrenUtils;
 use ET\Builder\Packages\StyleLibrary\Declarations\Declarations;
 use ET\Builder\Packages\StyleLibrary\Utils\StyleDeclarations;
-use ET\Builder\Packages\GlobalData\GlobalData;
 use WP_Block;
-use ET\Builder\Packages\ModuleUtils\ModuleUtils;
+use ET\Builder\FrontEnd\Module\ScriptData;
+use ET\Builder\FrontEnd\Assets\CriticalCSS;
 
 use ET_Builder_Post_Features;
 
@@ -137,6 +139,21 @@ class VideoModule implements DependencyInterface {
 				'attrName' => 'module',
 			]
 		);
+
+		// Register script data for lazy loading if video is below the fold.
+		$has_video = ! empty( $attrs['video']['innerContent']['desktop']['value']['src'] ?? '' ) ||
+			! empty( $attrs['video']['innerContent']['desktop']['value']['webm'] ?? '' );
+		if ( $has_video && CriticalCSS::should_generate_critical_css() && CriticalCSS::is_current_module_below_fold_for_lazy_load() ) {
+			ScriptData::add_data_item(
+				[
+					'data_name'    => 'video_lazy_load',
+					'data_item_id' => $id,
+					'data_item'    => [
+						'selector' => $selector,
+					],
+				]
+			);
+		}
 
 		MultiViewScriptData::set(
 			[
@@ -252,64 +269,80 @@ class VideoModule implements DependencyInterface {
 			'src_webm' => esc_url( $video_webm_url ),
 		];
 
+		$generate_video_html = function () use ( $video_params ) {
+			// Generate Video HTML.
+			if ( false !== et_pb_check_oembed_provider( $video_params['src'] ) ) {
+				$video = et_builder_get_oembed( $video_params['src'] );
+
+				if ( empty( $video ) && false !== VideoHTMLController::validate_youtube_url( $video_params['src'] ) ) {
+					$video = VideoHTMLController::get_youtube_fallback_embed_html( $video_params['src'] );
+				}
+			} elseif ( false !== VideoHTMLController::validate_youtube_url( $video_params['src'] ) ) {
+				$video = et_builder_get_oembed( VideoHTMLController::normalize_youtube_url( $video_params['src'] ) );
+
+				if ( empty( $video ) ) {
+					$video = VideoHTMLController::get_youtube_fallback_embed_html( $video_params['src'] );
+				}
+			} else {
+				$video = HTMLUtility::render(
+					[
+						'tag'               => 'video',
+						'attributes'        => [
+							'controls' => true,
+						],
+						'childrenSanitizer' => 'et_core_esc_previously',
+						'children'          => [
+							'' !== $video_params['src'] ? HTMLUtility::render(
+								[
+									'tag'               => 'source',
+									'attributes'        => [
+										'type' => 'video/mp4',
+										'src'  => $video_params['src'],
+									],
+									'childrenSanitizer' => 'et_core_esc_previously',
+								]
+							) : '',
+							'' !== $video_params['src_webm'] ? HTMLUtility::render(
+								[
+									'tag'               => 'source',
+									'attributes'        => [
+										'type' => 'video/webm',
+										'src'  => $video_params['src_webm'],
+									],
+									'childrenSanitizer' => 'et_core_esc_previously',
+								]
+							) : '',
+						],
+					]
+				);
+			}
+
+			return $video;
+		};
+
 		// Get the attachment ID from the cache.
 		$video = $post_features->get(
 			// Cache key.
 			$cache_key,
 			// Callback function if the cache key is not found.
-			function () use ( $video_params ) {
-				// Generate Video HTML.
-				if ( false !== et_pb_check_oembed_provider( $video_params['src'] ) ) {
-					$video = et_builder_get_oembed( $video_params['src'] );
-
-					if ( empty( $video ) && false !== VideoHTMLController::validate_youtube_url( $video_params['src'] ) ) {
-						$video = VideoHTMLController::get_youtube_fallback_embed_html( $video_params['src'] );
-					}
-				} elseif ( false !== VideoHTMLController::validate_youtube_url( $video_params['src'] ) ) {
-					$video = et_builder_get_oembed( VideoHTMLController::normalize_youtube_url( $video_params['src'] ) );
-
-					if ( empty( $video ) ) {
-						$video = VideoHTMLController::get_youtube_fallback_embed_html( $video_params['src'] );
-					}
-				} else {
-					$video = HTMLUtility::render(
-						[
-							'tag'               => 'video',
-							'attributes'        => [
-								'controls' => true,
-							],
-							'childrenSanitizer' => 'et_core_esc_previously',
-							'children'          => [
-								'' !== $video_params['src'] ? HTMLUtility::render(
-									[
-										'tag'        => 'source',
-										'attributes' => [
-											'type' => 'video/mp4',
-											'src'  => $video_params['src'],
-										],
-										'childrenSanitizer' => 'et_core_esc_previously',
-									]
-								) : '',
-								'' !== $video_params['src_webm'] ? HTMLUtility::render(
-									[
-										'tag'        => 'source',
-										'attributes' => [
-											'type' => 'video/webm',
-											'src'  => $video_params['src_webm'],
-										],
-										'childrenSanitizer' => 'et_core_esc_previously',
-									]
-								) : '',
-							],
-						]
-					);
-				}
-
-				return $video;
-			},
+			$generate_video_html,
 			// Cache group.
 			'video_html'
 		);
+
+		// ET_Builder_Post_Feature_Base::get() treats a missing key on an already-primed cache as
+		// falsey without re-running the callback. Paginated Loop Builder pages introduce new video
+		// URLs that were not present when page 1 primed `_et_builder_post_features_cache`, so
+		// recompute and persist those entries (#50701).
+		if ( false === $video ) {
+			$before = microtime( true );
+			$video  = $generate_video_html();
+
+			// Only persist string HTML; oEmbed can return false/non-string on failure (#50701).
+			if ( is_string( $video ) ) {
+				$post_features->cache_set( $cache_key, $video, 'video_html', microtime( true ) - $before );
+			}
+		}
 
 		if ( ! is_string( $video ) ) {
 			$video = '';
@@ -412,7 +445,10 @@ class VideoModule implements DependencyInterface {
 			'src'      => esc_url( $video_mp4_url ),
 			'src_webm' => esc_url( $video_webm_url ),
 		];
-		$video        = self::get_video_html( $video_params['src'], $video_params['src_webm'] );
+		$video_html   = self::get_video_html( $video_params['src'], $video_params['src_webm'] );
+
+		// Defer video loading if module is below the fold.
+		$video = VideoUtils::maybe_defer_video_loading( $video_html );
 
 		// Video HTML.
 		$video_html = HTMLUtility::render(
@@ -487,7 +523,7 @@ class VideoModule implements DependencyInterface {
 
 		$parent = BlockParserStore::get_parent( $block->parsed_block['id'], $block->parsed_block['storeInstance'] );
 
-		return Module::render(
+		$res = Module::render(
 			[
 				// FE only.
 				'orderIndex'               => $block->parsed_block['orderIndex'],
@@ -504,7 +540,7 @@ class VideoModule implements DependencyInterface {
 				'stylesComponent'          => [ self::class, 'module_styles' ],
 				'scriptDataComponent'      => [ self::class, 'module_script_data' ],
 				'parentId'                 => $parent->id ?? '',
-				'parentName'               => $parent->blockName ?? '',
+				'parentName'               => $parent->blockName ?? '', // @phpcs:ignore -- Snake case is valid in this case.
 				'parentAttrs'              => $parent->attrs ?? [],
 				'childrenIds'              => $children_ids,
 				'children'                 => $elements->style_components(
@@ -514,6 +550,8 @@ class VideoModule implements DependencyInterface {
 				) . $video_html . $video_cover_image_html . $content,
 			]
 		);
+
+		return $res;
 	}
 
 	/**

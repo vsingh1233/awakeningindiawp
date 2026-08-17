@@ -24,6 +24,7 @@ use ET\Builder\FrontEnd\Assets\DynamicAssets;
 use ET\Builder\FrontEnd\Assets\DynamicAssetsUtils;
 use ET\Builder\Framework\Utility\ArrayUtility;
 use ET\Builder\Packages\Module\Options\Loop\LoopUtils;
+use ET\Builder\Packages\ModuleLibrary\PostFilter\PostFilterUtils;
 use Feature\ContentRetriever\ET_Builder_Content_Retriever;
 /**
  * Static CSS class.
@@ -72,6 +73,9 @@ class StaticCSS implements DependencyInterface {
 
 		// Disable static CSS for pages with paginated loops to prevent stale CSS variable caching.
 		add_filter( 'et_core_is_static_css_enabled', [ self::class, 'maybe_disable_static_css_for_paginated_loops' ], 10, 1 );
+
+		// Disable static CSS for pages with post-filtered loops to prevent partial loop style caching.
+		add_filter( 'et_core_is_static_css_enabled', [ self::class, 'maybe_disable_static_css_for_post_filtered_loops' ], 10, 1 );
 	}
 
 	/**
@@ -257,6 +261,9 @@ class StaticCSS implements DependencyInterface {
 		// Check if page has random order loops - disable static CSS to prevent stale CSS variable caching.
 		$current_page_has_random_order_loops = LoopUtils::current_page_has_random_order_loops();
 
+		// Check if page has post-filtered loops - disable static CSS to prevent partial loop style caching.
+		$has_post_filtered_loops = PostFilterUtils::has_active_loop_filter_clauses_in_request();
+
 		// Check blog style mode for post feeds.
 		$blog_style_mode = 'on' === et_get_option( 'divi_blog_style', 'off' );
 
@@ -299,8 +306,8 @@ class StaticCSS implements DependencyInterface {
 			)
 		) : '';
 
-		// Include pagination, random order state, blog style mode, and excerpt_content_on in cache key to prevent cross-request caching issues.
-		$cache_key = $post_id . intval( $should_generate_critical_css ) . intval( $has_paginated_loops ) . intval( $current_page_has_random_order_loops ) . intval( $blog_style_mode ) . intval( $has_excerpt_content_on ) . $pagination_key;
+		// Include pagination, random order state, post-filter state, blog style mode, and excerpt_content_on in cache key to prevent cross-request caching issues.
+		$cache_key = $post_id . intval( $should_generate_critical_css ) . intval( $has_paginated_loops ) . intval( $current_page_has_random_order_loops ) . intval( $has_post_filtered_loops ) . intval( $blog_style_mode ) . intval( $has_excerpt_content_on ) . $pagination_key;
 
 		if ( isset( self::$_setup_styles_manager_cache[ $cache_key ] ) ) {
 			return self::$_setup_styles_manager_cache[ $cache_key ];
@@ -322,7 +329,7 @@ class StaticCSS implements DependencyInterface {
 		$force_inline_no_post_id = ! $post_id && ( ! $is_post_feed || $blog_style_mode || $has_excerpt_content_on );
 
 		// All things considered, should we force inline styles?
-		$forced_inline = $force_inline_no_post_id || $is_preview || $forced_in_footer || $static_css_is_disabled || $has_paginated_loops || $current_page_has_random_order_loops || et_core_is_safe_mode_active() || ET_GB_Block_Layout::is_layout_block_preview();
+		$forced_inline = $force_inline_no_post_id || $is_preview || $forced_in_footer || $static_css_is_disabled || $has_paginated_loops || $current_page_has_random_order_loops || $has_post_filtered_loops || et_core_is_safe_mode_active() || ET_GB_Block_Layout::is_layout_block_preview();
 
 		// Are we using unified styles?
 		$unified_styles = ! $forced_inline && ! $forced_in_footer;
@@ -439,6 +446,28 @@ class StaticCSS implements DependencyInterface {
 
 		// Disable static CSS if paginated loops detected.
 		return ! $has_paginated_loops;
+	}
+
+	/**
+	 * Disable static CSS for pages with post-filtered loops.
+	 *
+	 * @since ??
+	 *
+	 * @param bool $is_enabled Whether static CSS is enabled.
+	 *
+	 * @return bool Modified enabled status.
+	 */
+	public static function maybe_disable_static_css_for_post_filtered_loops( bool $is_enabled ): bool {
+		// Only disable if static CSS was originally enabled.
+		if ( ! $is_enabled ) {
+			return $is_enabled;
+		}
+
+		// Check if page has post-filtered loops.
+		$has_post_filtered_loops = PostFilterUtils::has_active_loop_filter_clauses_in_request();
+
+		// Disable static CSS if post-filtered loops detected.
+		return ! $has_post_filtered_loops;
 	}
 
 	/**

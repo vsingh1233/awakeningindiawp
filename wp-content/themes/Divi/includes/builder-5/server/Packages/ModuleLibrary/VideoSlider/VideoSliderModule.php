@@ -26,11 +26,12 @@ use ET\Builder\Packages\Module\Options\BoxShadow\BoxShadowClassnames;
 use ET\Builder\Packages\Module\Options\Css\CssStyle;
 use ET\Builder\Packages\Module\Options\Element\ElementClassnames;
 use ET\Builder\Packages\ModuleLibrary\ModuleRegistration;
+use ET\Builder\Packages\ModuleLibrary\Video\VideoUtils;
 use ET\Builder\Packages\ModuleLibrary\VideoSlider\VideoSliderPresetAttrsMap;
 use ET\Builder\Packages\StyleLibrary\Utils\StyleDeclarations;
-use ET\Builder\Packages\GlobalData\GlobalData;
-use ET\Builder\Packages\ModuleUtils\ModuleUtils;
 use ET\Builder\Packages\StyleLibrary\Declarations\Declarations;
+use ET\Builder\FrontEnd\Module\ScriptData;
+use ET\Builder\FrontEnd\Assets\CriticalCSS;
 
 /**
  * `VideoSliderModule` is consisted of functions used for Video Slider Module such as Front-End rendering, REST API Endpoints etc.
@@ -109,6 +110,36 @@ class VideoSliderModule implements DependencyInterface {
 		$elements->script_data(
 			[
 				'attrName' => 'module',
+			]
+		);
+
+		// Register script data for lazy loading.
+		// VideoSliderModule processes child content, so we check if any videos exist.
+		// The `is_above_the_fold` flag uses the lazy-load fold signal (row-granular)
+		// so video sliders below the fold inside a single tall section are detected
+		// and deferred correctly.
+		$is_below_the_fold = CriticalCSS::should_generate_critical_css() && CriticalCSS::is_current_module_below_fold_for_lazy_load();
+
+		ScriptData::add_data_item(
+			[
+				'data_name'    => 'video_lazy_load',
+				'data_item_id' => $id,
+				'data_item'    => [
+					'selector'          => $selector,
+					'is_above_the_fold' => ! $is_below_the_fold,
+				],
+			]
+		);
+		// Also register for slider lazy loading (video slider uses slider functionality).
+		// Pass the order class (selector) so JS can efficiently check if a slider belongs to a below-the-fold module.
+		ScriptData::add_data_item(
+			[
+				'data_name'    => 'slider_lazy_load',
+				'data_item_id' => $id,
+				'data_item'    => [
+					'selector'          => $selector,
+					'is_above_the_fold' => ! $is_below_the_fold,
+				],
 			]
 		);
 
@@ -193,6 +224,10 @@ class VideoSliderModule implements DependencyInterface {
 		$show_thumbnails       = $attrs['sliderControls']['advanced']['desktop']['value']['useThumbnails'] ?? 'on';
 		$slider_controls_color = $attrs['sliderControls']['advanced']['desktop']['value']['color'] ?? '';
 
+		// Defer video loading if module is below the fold.
+		// The $content contains rendered HTML from VideoSliderItem child modules.
+		$content = VideoUtils::maybe_defer_video_loading( $content );
+
 		$children = '';
 
 		// Module-level style components (backgrounds, etc.) - should be at module root level.
@@ -259,7 +294,7 @@ class VideoSliderModule implements DependencyInterface {
 				'stylesComponent'          => [ self::class, 'module_styles' ],
 				'scriptDataComponent'      => [ self::class, 'module_script_data' ],
 				'parentId'                 => $parent->id ?? '',
-				'parentName'               => $parent->blockName ?? '',
+				'parentName'               => $parent->blockName ?? '', // @phpcs:ignore -- Snake case is valid in this case.
 				'parentAttrs'              => $parent->attrs ?? [],
 				'children'                 => $children,
 				'childrenIds'              => $children_ids,

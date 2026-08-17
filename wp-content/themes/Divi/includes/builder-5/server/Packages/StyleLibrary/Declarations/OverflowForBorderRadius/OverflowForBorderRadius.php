@@ -90,8 +90,9 @@ class OverflowForBorderRadius {
 			]
 		);
 
-		// If radius is empty or has no keys, return empty string.
-		if ( ! $radius || 0 === count( $radius ) ) {
+		// If radius is empty, not an array, or has no keys, return empty string.
+		// Non-array values (e.g. string shorthand "12px") must not reach count()/foreach.
+		if ( ! is_array( $radius ) || empty( $radius ) ) {
 			return $style_declarations->value();
 		}
 

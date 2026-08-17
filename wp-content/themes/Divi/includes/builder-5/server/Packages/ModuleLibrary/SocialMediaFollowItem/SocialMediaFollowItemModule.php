@@ -167,12 +167,14 @@ class SocialMediaFollowItemModule implements DependencyInterface {
 		$parent_attrs = ModuleRegistration::get_resolved_parent_attrs( $parent );
 
 		$item_url            = $attrs['socialNetwork']['innerContent']['desktop']['value']['link'] ?? '#';
-		$network_label       = $attrs['socialNetwork']['innerContent']['desktop']['value']['label'] ?? 'facebook';
+		$raw_network_slug    = $attrs['socialNetwork']['innerContent']['desktop']['value']['title'] ?? '';
+		$network_slug        = '' !== $raw_network_slug ? $raw_network_slug : 'facebook';
 		$follow_button_label = __( 'Follow', 'et_builder_5' );
 		$link_target_attrs   = $parent_attrs['button']['innerContent']['desktop']['value']['linkTarget'] ?? '';
 		$target              = HTMLUtility::link_target( $link_target_attrs );
 
-		$formatted_network_name = ucwords( $network_label );
+		$network_display_label  = self::get_network_display_label( $network_slug );
+		$formatted_network_name = ucwords( $network_display_label );
 		$formatted_title        = sprintf( __( 'Follow on %s', 'et_builder_5' ), $formatted_network_name );
 
 		$icon_link_attributes = self::build_link_attributes(
@@ -313,7 +315,35 @@ class SocialMediaFollowItemModule implements DependencyInterface {
 	}
 
 	/**
+	 * Resolve the display label for a social network item from its slug.
+	 *
+	 * The slug is the source of truth because default attrs merge can set a stale label on every child.
+	 *
+	 * @since ??
+	 *
+	 * @param string $network_slug Social network slug.
+	 *
+	 * @return string Network display label.
+	 */
+	public static function get_network_display_label( string $network_slug ): string {
+		if ( '' === $network_slug ) {
+			return self::get_social_network( 'facebook' )['label'];
+		}
+
+		$social_network = self::get_social_network( $network_slug );
+
+		if ( isset( $social_network['label'] ) ) {
+			return $social_network['label'];
+		}
+
+		return ucwords( str_replace( '_', ' ', $network_slug ) );
+	}
+
+	/**
 	 * Get social networks.
+	 *
+	 * Mirrors the `socialNetworks` constant on the TypeScript side.
+	 * Keep both lists in sync when adding or updating networks.
 	 *
 	 * @since ??
 	 *
@@ -322,156 +352,207 @@ class SocialMediaFollowItemModule implements DependencyInterface {
 	public static function get_social_networks(): array {
 		return [
 			''              => [
+				'label'      => __( 'Select a Network', 'et_builder_5' ),
 				'background' => '',
 			],
 			'amazon'        => [
+				'label'      => __( 'Amazon', 'et_builder_5' ),
 				'background' => '#ff9900',
 			],
 			'bandcamp'      => [
+				'label'      => __( 'Bandcamp', 'et_builder_5' ),
 				'background' => '#629aa9',
 			],
 			'behance'       => [
+				'label'      => __( 'Behance', 'et_builder_5' ),
 				'background' => '#0057ff',
 			],
 			'bitbucket'     => [
+				'label'      => __( 'BitBucket', 'et_builder_5' ),
 				'background' => '#205081',
 			],
 			'buffer'        => [
+				'label'      => __( 'Buffer', 'et_builder_5' ),
 				'background' => '#000000',
 			],
 			'codepen'       => [
+				'label'      => __( 'CodePen', 'et_builder_5' ),
 				'background' => '#000000',
 			],
 			'deviantart'    => [
+				'label'      => __( 'DeviantArt', 'et_builder_5' ),
 				'background' => '#05cc47',
 			],
 			'dribbble'      => [
+				'label'      => __( 'dribbble', 'et_builder_5' ),
 				'background' => '#ea4c8d',
 			],
 			'facebook'      => [
+				'label'      => __( 'Facebook', 'et_builder_5' ),
 				'background' => '#3b5998',
 			],
 			'flikr'         => [
+				'label'      => __( 'Flickr', 'et_builder_5' ),
 				'background' => '#ff0084',
 			],
 			'flipboard'     => [
+				'label'      => __( 'FlipBoard', 'et_builder_5' ),
 				'background' => '#e12828',
 			],
 			'foursquare'    => [
+				'label'      => __( 'Foursquare', 'et_builder_5' ),
 				'background' => '#f94877',
 			],
 			'github'        => [
+				'label'      => __( 'GitHub', 'et_builder_5' ),
 				'background' => '#333333',
 			],
 			'goodreads'     => [
+				'label'      => __( 'Goodreads', 'et_builder_5' ),
 				'background' => '#553b08',
 			],
 			'google'        => [
+				'label'      => __( 'Google', 'et_builder_5' ),
 				'background' => '#4285f4',
 			],
 			'houzz'         => [
+				'label'      => __( 'Houzz', 'et_builder_5' ),
 				'background' => '#7ac142',
 			],
 			'instagram'     => [
+				'label'      => __( 'Instagram', 'et_builder_5' ),
 				'background' => '#ea2c59',
 			],
 			'itunes'        => [
+				'label'      => __( 'iTunes', 'et_builder_5' ),
 				'background' => '#fe7333',
 			],
 			'last_fm'       => [
+				'label'      => __( 'Last.fm', 'et_builder_5' ),
 				'background' => '#b90000',
 			],
 			'line'          => [
+				'label'      => __( 'Line', 'et_builder_5' ),
 				'background' => '#00c300',
 			],
 			'linkedin'      => [
+				'label'      => __( 'LinkedIn', 'et_builder_5' ),
 				'background' => '#007bb6',
 			],
 			'medium'        => [
+				'label'      => __( 'Medium', 'et_builder_5' ),
 				'background' => '#00ab6c',
 			],
 			'meetup'        => [
+				'label'      => __( 'Meetup', 'et_builder_5' ),
 				'background' => '#e0393e',
 			],
 			'myspace'       => [
+				'label'      => __( 'MySpace', 'et_builder_5' ),
 				'background' => '#3b5998',
 			],
 			'odnoklassniki' => [
+				'label'      => __( 'Odnoklassniki', 'et_builder_5' ),
 				'background' => '#ed812b',
 			],
 			'patreon'       => [
+				'label'      => __( 'Patreon', 'et_builder_5' ),
 				'background' => '#f96854',
 			],
 			'periscope'     => [
+				'label'      => __( 'Periscope', 'et_builder_5' ),
 				'background' => '#3aa4c6',
 			],
 			'pinterest'     => [
+				'label'      => __( 'Pinterest', 'et_builder_5' ),
 				'background' => '#cb2027',
 			],
 			'quora'         => [
+				'label'      => __( 'Quora', 'et_builder_5' ),
 				'background' => '#a82400',
 			],
 			'reddit'        => [
+				'label'      => __( 'Reddit', 'et_builder_5' ),
 				'background' => '#ff4500',
 			],
 			'researchgate'  => [
+				'label'      => __( 'ResearchGate', 'et_builder_5' ),
 				'background' => '#40ba9b',
 			],
 			'rss'           => [
+				'label'      => __( 'RSS', 'et_builder_5' ),
 				'background' => '#ff8a3c',
 			],
 			'skype'         => [
+				'label'      => __( 'skype', 'et_builder_5' ),
 				'background' => '#12A5F4',
 			],
 			'snapchat'      => [
+				'label'      => __( 'Snapchat', 'et_builder_5' ),
 				'background' => '#fffc00',
 			],
 			'soundcloud'    => [
+				'label'      => __( 'SoundCloud', 'et_builder_5' ),
 				'background' => '#ff8800',
 			],
 			'spotify'       => [
+				'label'      => __( 'Spotify', 'et_builder_5' ),
 				'background' => '#1db954',
 			],
 			'steam'         => [
+				'label'      => __( 'Steam', 'et_builder_5' ),
 				'background' => '#00adee',
 			],
 			'telegram'      => [
+				'label'      => __( 'Telegram', 'et_builder_5' ),
 				'background' => '#179cde',
 			],
 			'tiktok'        => [
+				'label'      => __( 'TikTok', 'et_builder_5' ),
 				'background' => '#fe2c55',
 			],
 			'tripadvisor'   => [
+				'label'      => __( 'TripAdvisor', 'et_builder_5' ),
 				'background' => '#00af87',
 			],
 			'tumblr'        => [
+				'label'      => __( 'tumblr', 'et_builder_5' ),
 				'background' => '#32506d',
 			],
 			'twitch'        => [
+				'label'      => __( 'Twitch', 'et_builder_5' ),
 				'background' => '#6441a5',
 			],
 			'twitter'       => [
+				'label'      => __( 'X', 'et_builder_5' ),
 				'background' => '#000000',
 			],
 			'vimeo'         => [
+				'label'      => __( 'Vimeo', 'et_builder_5' ),
 				'background' => '#45bbff',
 			],
 			'vk'            => [
+				'label'      => __( 'VK', 'et_builder_5' ),
 				'background' => '#45668e',
 			],
 			'weibo'         => [
+				'label'      => __( 'Weibo', 'et_builder_5' ),
 				'background' => '#eb7350',
 			],
 			'whatsapp'      => [
+				'label'      => __( 'WhatsApp', 'et_builder_5' ),
 				'background' => '#25D366',
 			],
 			'xing'          => [
+				'label'      => __( 'XING', 'et_builder_5' ),
 				'background' => '#026466',
 			],
 			'yelp'          => [
+				'label'      => __( 'Yelp', 'et_builder_5' ),
 				'background' => '#af0606',
 			],
 			'youtube'       => [
+				'label'      => __( 'Youtube', 'et_builder_5' ),
 				'background' => '#a82400',
 			],
 		];

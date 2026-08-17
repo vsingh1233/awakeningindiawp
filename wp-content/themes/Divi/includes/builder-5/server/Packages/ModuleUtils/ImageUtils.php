@@ -94,12 +94,12 @@ class ImageUtils {
 		// If using CSS Grid layout, use smaller thumbnail size.
 		$layout_display = $attrs[ $grid_attr_path ]['decoration']['layout']['desktop']['value']['display'] ?? '';
 		if ( 'grid' === $layout_display ) {
-			return 'et-pb-portfolio-image'; // 400×284 - optimized for CSS Grid.
+			return self::_get_small_image_size( $grid_attr_path );
 		}
 
 		// If no attributes provided, use default grid image.
 		if ( empty( $attrs ) ) {
-			return 'et-pb-portfolio-image'; // 400×284.
+			return self::_get_small_image_size( $grid_attr_path );
 		}
 
 		// For flex/block layouts - check all breakpoints with device-specific thresholds.
@@ -127,6 +127,25 @@ class ImageUtils {
 		}
 
 		// Use small image only if both tablet and desktop have many small columns.
+		return self::_get_small_image_size( $grid_attr_path );
+	}
+
+	/**
+	 * Small thumbnail size for grid-based modules.
+	 *
+	 * Blog uses 400×250; Portfolio/Gallery use 400×284.
+	 *
+	 * @since ??
+	 *
+	 * @param string $grid_attr_path Grid attribute path.
+	 *
+	 * @return string WordPress image size name.
+	 */
+	private static function _get_small_image_size( string $grid_attr_path ): string {
+		if ( 'blogGrid' === $grid_attr_path ) {
+			return 'et-pb-post-main-image'; // 400×250.
+		}
+
 		return 'et-pb-portfolio-image'; // 400×284.
 	}
 

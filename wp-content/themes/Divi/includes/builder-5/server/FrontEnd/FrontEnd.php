@@ -21,6 +21,7 @@ use ET\Builder\Framework\Breakpoint\Breakpoint;
 use ET\Builder\Framework\DependencyManagement\DependencyTree;
 use ET\Builder\FrontEnd\Assets\DetectFeature;
 use ET\Builder\FrontEnd\Assets\DynamicAssetsUtils;
+use ET\Builder\FrontEnd\Assets\VbAppWindowScriptBootstrap;
 use ET\Builder\FrontEnd\Module\ScriptData;
 use ET\Builder\FrontEnd\Module\Style;
 use ET\Builder\FrontEnd\Module\Script;
@@ -32,6 +33,8 @@ use ET\Builder\Framework\Utility\Conditions;
 use ET\Builder\Packages\GlobalData\GlobalData;
 use ET\Builder\Packages\Module\Layout\Components\MultiView\MultiViewAssets;
 use ET\Builder\Packages\Module\Options\Background\BackgroundAssets;
+use ET\Builder\Packages\ModuleLibrary\GravityForms\GravityFormsHooks;
+use ET\Builder\Packages\ModuleLibrary\ImagelyGallery\ImagelyGalleryHooks;
 use ET\Builder\Packages\WooCommerce\WooCommerceHooks;
 use ET\Builder\VisualBuilder\OffCanvas\OffCanvasHooks;
 
@@ -403,8 +406,13 @@ class FrontEnd {
 		$ab_tests      = function_exists( 'et_builder_ab_get_current_tests' ) ? et_builder_ab_get_current_tests() : [];
 		$is_ab_testing = ! empty( $ab_tests );
 
-		// Enqueues et_get_combined_script_handle's deps.
+		// Dynamic Assets keep detection/CSS/cache off in VB, but the app window
+		// reuses DA script enqueue via disable_js_on_demand() (#51170). Sticky
+		// runtime also comes from the DA path in this context (#51283). After
+		// combined loads, wire et_pb_init_modules listeners as combined deps.
 		DynamicAssetsUtils::enqueue_combined_script();
+
+		VbAppWindowScriptBootstrap::wire_combined_dependencies();
 
 		$widget_search_selector = '.widget_search';
 		/**
@@ -861,6 +869,8 @@ $dependency_tree = new DependencyTree();
 $dependency_tree->add_dependency( new CriticalCSS() );
 $dependency_tree->add_dependency( new DynamicAssets() );
 $dependency_tree->add_dependency( new StaticCSS() );
+$dependency_tree->add_dependency( new GravityFormsHooks() );
+$dependency_tree->add_dependency( new ImagelyGalleryHooks() );
 $dependency_tree->add_dependency( new WooCommerceHooks() );
 
 $frontend = new FrontEnd( $dependency_tree );

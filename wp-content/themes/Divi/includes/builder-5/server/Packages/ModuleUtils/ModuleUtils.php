@@ -3330,6 +3330,29 @@ class ModuleUtils {
 	}
 
 	/**
+	 * Whether module preset `styleAttrs` merge into preset CSS (matches VB `ModuleLibraryPresetStylesContainer`).
+	 *
+	 * @since ??
+	 *
+	 * @param string $module_name Module name.
+	 *
+	 * @return bool
+	 */
+	public static function module_preset_merges_style_attrs( string $module_name ): bool {
+		return in_array(
+			$module_name,
+			[
+				'divi/button',
+				'divi/cta',
+				'divi/woocommerce-cart-products',
+				'divi/woocommerce-cart-totals',
+				'divi/social-media-follow-item',
+			],
+			true
+		);
+	}
+
+	/**
 	 * Recursively removes key-value pairs from a target array that have matching values in a reference array.
 	 *
 	 * This function compares a target array and a reference array. If a key exists in both and the values are equal,
@@ -4105,9 +4128,24 @@ class ModuleUtils {
 			if ( 'post' === $post_type ) {
 				// Filter out special values and convert 'current' to actual term ID(s).
 				$filtered_categories = [];
+				$queried_object      = get_queried_object();
 				foreach ( $categories_normalized as $category ) {
 					if ( 'current' === $category ) {
-						// Get categories from the current post using D4 pattern with Theme Builder support.
+						// Prefer the queried category archive term over the current post's full term set (D4 / Woo #48324 / #51023).
+						if ( $queried_object instanceof \WP_Term && 'category' === $queried_object->taxonomy ) {
+							$filtered_categories[] = (int) $queried_object->term_id;
+							continue;
+						}
+
+						if ( is_category() ) {
+							$archive_term_id = (int) get_queried_object_id();
+							if ( $archive_term_id > 0 ) {
+								$filtered_categories[] = $archive_term_id;
+								continue;
+							}
+						}
+
+						// Singular / explicit post ID: expand to that post's categories.
 						// Use provided ID for Visual Builder context, otherwise detect from context.
 						$detected_post_id = $current_post_id ? $current_post_id : self::_get_current_post_id_for_category_filtering();
 						if ( $detected_post_id > 0 ) {
@@ -4117,12 +4155,6 @@ class ModuleUtils {
 							}
 							$current_term_ids    = wp_list_pluck( $post_terms, 'term_id' );
 							$filtered_categories = array_merge( $filtered_categories, $current_term_ids );
-						} else {
-							// Fallback to original archive logic for compatibility.
-							$term_id = is_category() ? get_queried_object()->term_id : 0;
-							if ( $term_id > 0 ) {
-								$filtered_categories[] = $term_id;
-							}
 						}
 					} else {
 						$filtered_categories[] = (int) $category;
@@ -4149,11 +4181,31 @@ class ModuleUtils {
 				$taxonomy = self::get_taxonomy_for_post_type( $post_type );
 
 				// Filter out special values and convert 'current' to actual term ID(s).
-				$filtered_categories = [];
+				$filtered_categories     = [];
+				$queried_object          = get_queried_object();
+				$current_tax_query_value = ! empty( $taxonomy ) ? get_query_var( $taxonomy ) : '';
 				foreach ( $categories_normalized as $category ) {
 					if ( 'current' === $category ) {
-						// Get taxonomy terms from the current post. Use provided ID for Visual Builder context,
-						// otherwise detect from context.
+						// Prefer the queried taxonomy archive term over the current post's full term set (D4 / Woo #48324 / #51023).
+						if ( $queried_object instanceof \WP_Term && $taxonomy === $queried_object->taxonomy ) {
+							$filtered_categories[] = (int) $queried_object->term_id;
+							continue;
+						}
+
+						// Query-var fallback for edge cases (parity with Woo #48324).
+						if ( ! empty( $current_tax_query_value ) ) {
+							$current_tax_term = is_numeric( $current_tax_query_value )
+								? get_term_by( 'id', (int) $current_tax_query_value, $taxonomy )
+								: get_term_by( 'slug', sanitize_title( $current_tax_query_value ), $taxonomy );
+
+							if ( $current_tax_term instanceof \WP_Term ) {
+								$filtered_categories[] = (int) $current_tax_term->term_id;
+								continue;
+							}
+						}
+
+						// Singular / explicit post ID: expand to that post's terms.
+						// Use provided ID for Visual Builder context, otherwise detect from context.
 						$detected_post_id = $current_post_id ? $current_post_id : self::_get_current_post_id_for_category_filtering();
 						if ( $detected_post_id > 0 ) {
 							$post_terms = wp_get_object_terms( $detected_post_id, $taxonomy );
@@ -4162,12 +4214,6 @@ class ModuleUtils {
 							}
 							$current_term_ids    = wp_list_pluck( $post_terms, 'term_id' );
 							$filtered_categories = array_merge( $filtered_categories, $current_term_ids );
-						} else {
-							// Fallback to original archive logic for compatibility.
-							$term_id = is_tax( $taxonomy ) ? get_queried_object()->term_id : 0;
-							if ( $term_id > 0 ) {
-								$filtered_categories[] = $term_id;
-							}
 						}
 						// phpcs:ignore Universal.ControlStructures.DisallowLonelyIf.Found -- Intentional else-if pattern for readability.
 					} else {
@@ -4554,16 +4600,19 @@ class ModuleUtils {
 	 * In Theme Builder context, the global $post is the template post, not the displayed post.
 	 * This method gets the actual post being displayed for proper category filtering.
 	 *
+	 * Only returns a post ID on singular views. On taxonomy/category archives, returning the
+	 * main-query post would expand "Current Category" to that post's full term set (#51023).
+	 *
 	 * @since ??
 	 *
-	 * @return int Current post ID, or 0 if not found.
+	 * @return int Current post ID, or 0 if not found / not singular.
 	 */
 	private static function _get_current_post_id_for_category_filtering(): int {
 		// Check if we're in Theme Builder context.
 		$is_theme_builder = class_exists( '\ET_Theme_Builder_Layout' ) && \ET_Theme_Builder_Layout::is_theme_builder_layout();
 
-		if ( $is_theme_builder ) {
-			// In Theme Builder, get the main post ID (the actual post being displayed).
+		if ( $is_theme_builder && true === is_singular() ) {
+			// In Theme Builder on singular pages, get the main post ID (the actual post being displayed).
 			$main_post_id = class_exists( '\ET_Post_Stack' ) ? \ET_Post_Stack::get_main_post_id() : 0;
 			if ( $main_post_id > 0 ) {
 				return $main_post_id;
@@ -4578,9 +4627,10 @@ class ModuleUtils {
 			}
 		}
 
-		// Fallback to get_the_ID().
+		// Fallback to get_the_ID() only on singular pages.
+		// On archives, get_the_ID() returns loop post IDs which would mis-resolve Current Category.
 		$post_id = get_the_ID();
-		return $post_id > 0 ? $post_id : 0;
+		return $post_id > 0 && is_singular() ? $post_id : 0;
 	}
 
 	/**

@@ -246,9 +246,12 @@ class SyncToServerController extends RESTController {
 			}
 		}
 
-		$main_post             = get_post( $post_id );
-		$has_main_post_context = $main_post instanceof \WP_Post;
-		$update                = $has_main_post_context ? wp_update_post( $post_update_data ) : 0;
+		// Persist main post content/meta only for singular VB saves.
+		// On non-singular pages (home/archive), request post_id may be the first
+		// main-query loop post and must not be converted to Divi (#49679).
+		$main_post                = get_post( $post_id );
+		$should_persist_main_post = $main_post instanceof \WP_Post && 'singular' === $main_loop_type;
+		$update                   = $should_persist_main_post ? wp_update_post( $post_update_data ) : 0;
 
 		$layout_updates                        = [
 			[
@@ -373,9 +376,9 @@ class SyncToServerController extends RESTController {
 		// all post meta (including appended canvas content) is available.
 		SavingUtility::prime_page_cache_on_save( $post_id, $prime_cache_url );
 
-		if ( ( $update && ! is_wp_error( $update ) ) || ( ! $has_main_post_context && ! is_wp_error( $update ) ) ) {
+		if ( ( $update && ! is_wp_error( $update ) ) || ( ! $should_persist_main_post && ! is_wp_error( $update ) ) ) {
 			// Update post meta so we know D5 is used and Readiness migrator will skip it.
-			if ( $has_main_post_context ) {
+			if ( $should_persist_main_post ) {
 				update_post_meta( $post_id, '_et_pb_use_divi_5', 'on' );
 				// Also set the legacy meta for backward compatibility with D4 components.
 				update_post_meta( $post_id, '_et_pb_use_builder', 'on' );
@@ -426,8 +429,8 @@ class SyncToServerController extends RESTController {
 			 */
 			do_action( 'divi_visual_builder_rest_update_post', $post_id );
 
-			$saved_post_content = $has_main_post_context ? get_post_field( 'post_content', $update ) : $post_content;
-			$verification       = $has_main_post_context
+			$saved_post_content = $should_persist_main_post ? get_post_field( 'post_content', $update ) : $post_content;
+			$verification       = $should_persist_main_post
 				? self::_verify_post_content_matches_after_sanitization( $post_content, $saved_post_content )
 				: true;
 
@@ -458,7 +461,7 @@ class SyncToServerController extends RESTController {
 
 			$return_rendered_content = $options['return_rendered_content'] ?? false;
 
-			if ( $return_rendered_content && $has_main_post_context ) {
+			if ( $return_rendered_content && $should_persist_main_post ) {
 				// Replace dynamic data in the content with the actual value.
 				$normalized_content = DynamicData::get_processed_dynamic_data( $saved_post_content, $post_id, true );
 
@@ -470,7 +473,7 @@ class SyncToServerController extends RESTController {
 
 			return self::response_success(
 				[
-					'post_status'       => $has_main_post_context ? get_post_status( $update ) : $post_status,
+					'post_status'       => $should_persist_main_post ? get_post_status( $update ) : $post_status,
 					'save_verification' => $save_verification_filtered,
 					'rendered_content'  => $rendered_content,
 				]

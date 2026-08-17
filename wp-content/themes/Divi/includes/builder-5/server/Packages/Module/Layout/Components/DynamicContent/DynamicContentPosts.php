@@ -46,7 +46,8 @@ class DynamicContentPosts {
 	 *                If `is_home() === true`, the title will be "Blog".
 	 *                If `is_404() === true`, the title will be "No Results Found".
 	 *                If `is_search() === true`, the title will be "Results for "Search Query"".
-	 *                If `is_author() === true`, the title will be the author name.
+	 *                If `is_author() === true`, the title will be the queried author name when available,
+	 *                otherwise the current post author name.
 	 *                If `is_post_type_archive() === true`, the title will be the post type archive title.
 	 *                If `is_category() === true`, the title will be the category title.
 	 *                If `is_date() === true`, the title will be the formatted date archive title:
@@ -68,12 +69,10 @@ class DynamicContentPosts {
 	 * ```
 	 */
 	public static function get_current_page_title( $post_id = 0, array $data_args = [] ): string {
-		if ( 0 === $post_id ) {
-			if ( \ET_Theme_Builder_Layout::is_theme_builder_layout() && is_singular() ) {
-				$post_id = \ET_Post_Stack::get_main_post()->ID;
-			} else {
-				$post_id = get_the_ID();
-			}
+		$is_auto_resolved_post_id = 0 === $post_id;
+
+		if ( $is_auto_resolved_post_id ) {
+			$post_id = self::_resolve_auto_post_id();
 		}
 
 		$post_id = (int) $post_id;
@@ -96,7 +95,7 @@ class DynamicContentPosts {
 		// phpcs:ignore ET.Comments.Todo.TodoFound -- TODO has issue reference (#25149) but doesn't match exact PHPCS format requirement.
 		// TODO feat(D5, Theme Builder): Replace it once the Theme Builder is implemented in D5.
 		// @see https://github.com/elegantthemes/Divi/issues/25149.
-		if ( is_singular() || ( ! \ET_Theme_Builder_Layout::is_theme_builder_layout() && ! is_archive() ) ) {
+		if ( self::_should_return_post_title( $is_auto_resolved_post_id ) ) {
 			return get_the_title( $post_id );
 		}
 
@@ -117,6 +116,12 @@ class DynamicContentPosts {
 		}
 
 		if ( is_author() ) {
+			$queried_object = get_queried_object();
+
+			if ( $queried_object instanceof \WP_User && ! empty( $queried_object->display_name ) ) {
+				return $queried_object->display_name;
+			}
+
 			return get_the_author();
 		}
 
@@ -138,6 +143,91 @@ class DynamicContentPosts {
 		}
 
 		return get_the_archive_title();
+	}
+
+	/**
+	 * Whether the main WordPress query is a singular content request.
+	 *
+	 * Theme Builder layout rendering can spoof or invalidate the global post, so callers must
+	 * infer singular context from the main query state rather than from `ET_Post_Stack` alone.
+	 *
+	 * @since ??
+	 *
+	 * @return bool
+	 */
+	private static function _is_main_query_singular_content(): bool {
+		global $wp_query;
+
+		if ( ! $wp_query instanceof \WP_Query ) {
+			return false;
+		}
+
+		if ( $wp_query->is_archive || $wp_query->is_search ) {
+			return false;
+		}
+
+		if ( $wp_query->is_home && ! $wp_query->is_front_page ) {
+			return false;
+		}
+
+		return (bool) $wp_query->is_singular;
+	}
+
+	/**
+	 * Resolve the post ID when the caller did not provide one.
+	 *
+	 * In a Theme Builder layout, prefer the stack's main post ID. If the stack is invalid
+	 * (e.g., The Events Calendar Default Page Template leaves `$wp_query->post` empty) and
+	 * the main query is still singular, fall back to the queried object. Otherwise fall back
+	 * to the current global post ID.
+	 *
+	 * @since ??
+	 *
+	 * @return int The resolved post ID.
+	 */
+	private static function _resolve_auto_post_id(): int {
+		if ( \ET_Theme_Builder_Layout::is_theme_builder_layout() ) {
+			$post_id = \ET_Post_Stack::get_main_post_id();
+
+			if ( 0 < $post_id ) {
+				return $post_id;
+			}
+
+			if ( self::_is_main_query_singular_content() ) {
+				$post_id = get_queried_object_id();
+
+				if ( 0 < $post_id ) {
+					return $post_id;
+				}
+			}
+		}
+
+		return get_the_ID();
+	}
+
+	/**
+	 * Whether the current page should return a post title instead of a contextual title.
+	 *
+	 * @since ??
+	 *
+	 * @param bool $is_auto_resolved_post_id Whether the post ID was auto-resolved.
+	 *
+	 * @return bool
+	 */
+	private static function _should_return_post_title( bool $is_auto_resolved_post_id ): bool {
+		if ( is_singular() ) {
+			return true;
+		}
+
+		if ( $is_auto_resolved_post_id && self::_is_main_query_singular_content() ) {
+			return true;
+		}
+
+		if ( ! \ET_Theme_Builder_Layout::is_theme_builder_layout() && ! is_archive() ) {
+			return true;
+		}
+
+		return false;
 	}
 
 	/**

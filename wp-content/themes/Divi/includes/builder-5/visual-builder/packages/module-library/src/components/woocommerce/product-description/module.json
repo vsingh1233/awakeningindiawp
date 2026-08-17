@@ -251,9 +251,9 @@
                   "text-align": "{{selector}} ul",
                   "padding-left": "{{selector}} ul",
                   "color": "{{selector}}.et_pb_wc_description ul",
-                  "line-height": "{{selector}} ul li",
-                  "list-style-type": "{{selector}} ul li",
-                  "list-style-position": "{{selector}} ul li"
+                  "line-height": "{{selector}} ul > li",
+                  "list-style-type": "{{selector}} ul > li",
+                  "list-style-position": "{{selector}} ul > li"
                 }
               }
             },
@@ -266,9 +266,9 @@
                   "text-align": "{{selector}} ol",
                   "padding-left": "{{selector}} ol",
                   "color": "{{selector}}.et_pb_wc_description ol",
-                  "line-height": "{{selector}} ol li",
-                  "list-style-type": "{{selector}} ol li",
-                  "list-style-position": "{{selector}} ol li"
+                  "line-height": "{{selector}} ol > li",
+                  "list-style-type": "{{selector}} ol > li",
+                  "list-style-position": "{{selector}} ol > li"
                 }
               }
             },

@@ -246,14 +246,15 @@ class PreferencesWorkspaceController extends RESTController {
 			return [];
 		}
 
-		$preferences = WorkspacePayloadSanitizer::sanitize_nested_array( $preferences );
-		$sanitized   = [];
-		$app         = is_array( $preferences['app'] ?? null ) ? $preferences['app'] : [];
-		$history     = is_array( $preferences['history'] ?? null ) ? $preferences['history'] : [];
-		$modal       = is_array( $preferences['modal'] ?? null ) ? $preferences['modal'] : [];
-		$module      = is_array( $preferences['module'] ?? null ) ? $preferences['module'] : [];
-		$page_flow   = is_array( $preferences['pageCreationFlow'] ?? null ) ? $preferences['pageCreationFlow'] : [];
-		$page_icons  = is_array( $preferences['pageBarIcons'] ?? null ) ? $preferences['pageBarIcons'] : [];
+		$preferences   = WorkspacePayloadSanitizer::sanitize_nested_array( $preferences );
+		$sanitized     = [];
+		$app           = is_array( $preferences['app'] ?? null ) ? $preferences['app'] : [];
+		$history       = is_array( $preferences['history'] ?? null ) ? $preferences['history'] : [];
+		$modal         = is_array( $preferences['modal'] ?? null ) ? $preferences['modal'] : [];
+		$module        = is_array( $preferences['module'] ?? null ) ? $preferences['module'] : [];
+		$page_flow     = is_array( $preferences['pageCreationFlow'] ?? null ) ? $preferences['pageCreationFlow'] : [];
+		$page_icons    = is_array( $preferences['pageBarIcons'] ?? null ) ? $preferences['pageBarIcons'] : [];
+		$builder_icons = is_array( $preferences['builderBarIcons'] ?? null ) ? $preferences['builderBarIcons'] : [];
 
 		$view_mode = $app['view'] ?? $preferences['viewMode'] ?? null;
 		if ( is_string( $view_mode ) ) {
@@ -289,6 +290,11 @@ class PreferencesWorkspaceController extends RESTController {
 		$show_theme_builder_templates = $app['showThemeBuilderTemplates'] ?? $preferences['showThemeBuilderTemplates'] ?? null;
 		if ( null !== $show_theme_builder_templates && ! is_array( $show_theme_builder_templates ) ) {
 			$sanitized['showThemeBuilderTemplates'] = rest_sanitize_boolean( $show_theme_builder_templates );
+		}
+
+		$theme_builder_template_editing = $app['themeBuilderTemplateEditing'] ?? $preferences['themeBuilderTemplateEditing'] ?? null;
+		if ( null !== $theme_builder_template_editing && ! is_array( $theme_builder_template_editing ) ) {
+			$sanitized['themeBuilderTemplateEditing'] = rest_sanitize_boolean( $theme_builder_template_editing );
 		}
 
 		$app_enable_prerendering = $app['enablePrerendering'] ?? $preferences['appEnablePrerendering'] ?? null;
@@ -340,6 +346,30 @@ class PreferencesWorkspaceController extends RESTController {
 				'portability'  => rest_sanitize_boolean( $page_icons['portability'] ?? true ),
 				'clearLayout'  => rest_sanitize_boolean( $page_icons['clearLayout'] ?? true ),
 				'addToLibrary' => rest_sanitize_boolean( $page_icons['addToLibrary'] ?? true ),
+			];
+		}
+
+		if ( empty( $builder_icons ) && is_array( $preferences['builderBarIcons'] ?? null ) ) {
+			$builder_icons = $preferences['builderBarIcons'];
+		}
+		if ( is_array( $builder_icons ) ) {
+			$sanitized['builderBarIcons'] = [
+				'loadLayout'               => rest_sanitize_boolean( $builder_icons['loadLayout'] ?? true ),
+				'layers'                   => rest_sanitize_boolean( $builder_icons['layers'] ?? true ),
+				'inspector'                => rest_sanitize_boolean( $builder_icons['inspector'] ?? true ),
+				'variableManager'          => rest_sanitize_boolean( $builder_icons['variableManager'] ?? true ),
+				'presetManager'            => rest_sanitize_boolean( $builder_icons['presetManager'] ?? true ),
+				'pageManager'              => rest_sanitize_boolean( $builder_icons['pageManager'] ?? true ),
+				'commandCenter'            => rest_sanitize_boolean( $builder_icons['commandCenter'] ?? true ),
+				'wireframeView'            => rest_sanitize_boolean( $builder_icons['wireframeView'] ?? true ),
+				'actionIconsOnHover'       => rest_sanitize_boolean( $builder_icons['actionIconsOnHover'] ?? true ),
+				'parentActionIconsOnHover' => rest_sanitize_boolean( $builder_icons['parentActionIconsOnHover'] ?? true ),
+				'xRay'                     => rest_sanitize_boolean( $builder_icons['xRay'] ?? true ),
+				'workspace'                => rest_sanitize_boolean( $builder_icons['workspace'] ?? true ),
+				'help'                     => rest_sanitize_boolean( $builder_icons['help'] ?? true ),
+				'announcements'            => rest_sanitize_boolean( $builder_icons['announcements'] ?? true ),
+				'aiAgent'                  => rest_sanitize_boolean( $builder_icons['aiAgent'] ?? true ),
+				'interfaceModeToggle'      => rest_sanitize_boolean( $builder_icons['interfaceModeToggle'] ?? true ),
 			];
 		}
 

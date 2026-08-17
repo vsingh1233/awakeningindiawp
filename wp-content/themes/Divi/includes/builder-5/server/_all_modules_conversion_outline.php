@@ -2978,14 +2978,14 @@ return [
             'date_format' => 'meta.advanced.dateFormat.*',
             'categories' => 'meta.advanced.showCategories.*',
             'comments' => 'meta.advanced.showCommentsCount.*',
-            'featured_image' => 'featuredImage.advanced.enabled.*',
-            'featured_placement' => 'featuredImage.advanced.placement.*',
-            'force_fullwidth' => 'featuredImage.advanced.forceFullwidth.*',
-            'image_width' => 'featuredImage.decoration.sizing.*.width',
-            'image_max_width' => 'featuredImage.decoration.sizing.*.maxWidth',
-            'image_height' => 'featuredImage.decoration.sizing.*.height',
-            'image_max_height' => 'featuredImage.decoration.sizing.*.maxHeight',
-            'image_alignment' => 'featuredImage.decoration.sizing.*.alignment',
+            'featured_image' => 'image.advanced.enabled.*',
+            'featured_placement' => 'image.advanced.placement.*',
+            'force_fullwidth' => 'image.advanced.forceFullwidth.*',
+            'image_width' => 'image.decoration.sizing.*.width',
+            'image_max_width' => 'image.decoration.sizing.*.maxWidth',
+            'image_height' => 'image.decoration.sizing.*.height',
+            'image_max_height' => 'image.decoration.sizing.*.maxHeight',
+            'image_alignment' => 'image.decoration.sizing.*.alignment',
             'text_background' => 'textWrapper.advanced.useBackground.*',
             'text_bg_color' => 'textWrapper.decoration.background.*.color',
             'text_color' => 'module.advanced.text.text.*.color',
@@ -5082,6 +5082,7 @@ return [
             'open_icon_font_size' => 'openToggleIcon.decoration.icon.*.size',
             'closed_toggle_text_color' =>
                 'closedTitle.decoration.font.font.*.color',
+            'title_text_color' => 'closedTitle.decoration.font.font.*.color',
             'title_level' => 'title.decoration.font.font.*.headingLevel',
             'open_toggle_text_color' =>
                 'openToggle.decoration.font.font.*.color',
@@ -5090,7 +5091,8 @@ return [
         'valueExpansionFunctionMap' => [
             'open_toggle_icon' => 'convertFontIcon',
             'toggle_icon' => 'convertFontIcon',
-            'inline_fonts' => 'convertInlineFont'
+            'inline_fonts' => 'convertInlineFont',
+            'title_text_color' => 'convertToggleTitleTextColor'
         ]
     ],
     'video' => [

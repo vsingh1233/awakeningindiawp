@@ -537,9 +537,22 @@ class PostTitleModule implements DependencyInterface {
 			return '';
 		}
 
+		$raw_attrs = is_array( $block->parsed_block['attrs'] ?? null )
+			? $block->parsed_block['attrs']
+			: [];
+
+		$has_legacy_featured_image_attrs = self::has_legacy_featured_image_attrs( $raw_attrs );
+		$attrs                           = self::normalize_featured_image_attrs( $attrs, $raw_attrs, $has_legacy_featured_image_attrs );
+
 		$children_ids            = ChildrenUtils::extract_children_ids( $block );
 		$post_featured_image     = self::get_featured_image();
 		$post_featured_image_src = $post_featured_image['src'] ?? '';
+		$raw_meta_advanced       = is_array( $raw_attrs['meta']['advanced'] ?? null )
+			? $raw_attrs['meta']['advanced']
+			: null;
+		$force_missing_meta_toggles_off = $has_legacy_featured_image_attrs
+			&& is_array( $raw_meta_advanced )
+			&& array_key_exists( 'showMeta', $raw_meta_advanced );
 
 		return Module::render(
 			[
@@ -580,7 +593,7 @@ class PostTitleModule implements DependencyInterface {
 							'childrenSanitizer' => 'et_core_esc_previously',
 							'children'          => [
 								self::render_title( $attrs, $elements ),
-								self::render_meta( $attrs, $elements ),
+								self::render_meta( $attrs, $elements, $raw_meta_advanced, $force_missing_meta_toggles_off ),
 							],
 						]
 					),
@@ -631,10 +644,12 @@ class PostTitleModule implements DependencyInterface {
 	 *
 	 * @param array          $attrs The module attributes.
 	 * @param ModuleElements $elements ModuleElements instance.
+	 * @param array|null     $raw_meta_advanced Raw runtime `meta.advanced` attrs.
+	 * @param bool           $force_missing_meta_toggles_off Whether missing runtime toggle keys should be treated as `off`.
 	 *
 	 * @return string The rendered meta.
 	 */
-	public static function render_meta( array $attrs, ModuleElements $elements ): string {
+	public static function render_meta( array $attrs, ModuleElements $elements, ?array $raw_meta_advanced = null, bool $force_missing_meta_toggles_off = false ): string {
 		return $elements->render(
 			[
 				'attrName'          => 'meta',
@@ -644,32 +659,47 @@ class PostTitleModule implements DependencyInterface {
 				'childrenSanitizer' => 'et_core_esc_previously',
 				'children'          => [
 					'attr'          => MultiViewUtils::merge_values( $attrs['meta']['advanced'] ),
-					'valueResolver' => function ( $value ) {
-						if ( 'on' !== $value['showMeta'] ) {
+					'valueResolver' => function ( $value ) use ( $raw_meta_advanced, $force_missing_meta_toggles_off ) {
+						if ( ! is_array( $value ) ) {
+							return '';
+						}
+
+						$show_meta = self::resolve_meta_toggle_value( 'showMeta', $value );
+
+						if ( 'on' !== $show_meta ) {
 							return '';
 						}
 
 						$meta = [];
 
-						$meta_author = self::render_meta_author( $value['showAuthor'] );
+						$meta_author = self::render_meta_author(
+							self::resolve_meta_toggle_value( 'showAuthor', $value, $raw_meta_advanced, $force_missing_meta_toggles_off )
+						);
 
 						if ( $meta_author ) {
 							$meta[] = $meta_author;
 						}
 
-						$meta_date = self::render_meta_date( $value['showDate'], $value['dateFormat'] ?? null );
+						$meta_date = self::render_meta_date(
+							self::resolve_meta_toggle_value( 'showDate', $value, $raw_meta_advanced, $force_missing_meta_toggles_off ),
+							$value['dateFormat'] ?? null
+						);
 
 						if ( $meta_date ) {
 							$meta[] = $meta_date;
 						}
 
-						$meta_categories = self::render_meta_categories( $value['showCategories'] );
+						$meta_categories = self::render_meta_categories(
+							self::resolve_meta_toggle_value( 'showCategories', $value, $raw_meta_advanced, $force_missing_meta_toggles_off )
+						);
 
 						if ( $meta_categories ) {
 							$meta[] = $meta_categories;
 						}
 
-						$meta_comments_count = self::render_meta_comments_count( $value['showCommentsCount'] );
+						$meta_comments_count = self::render_meta_comments_count(
+							self::resolve_meta_toggle_value( 'showCommentsCount', $value, $raw_meta_advanced, $force_missing_meta_toggles_off )
+						);
 
 						if ( $meta_comments_count ) {
 							$meta[] = $meta_comments_count;
@@ -681,6 +711,65 @@ class PostTitleModule implements DependencyInterface {
 				],
 			]
 		);
+	}
+
+	/**
+	 * Determines whether runtime attrs still use legacy featuredImage namespace.
+	 *
+	 * @param array $raw_attrs Raw parsed block attrs.
+	 *
+	 * @return bool
+	 */
+	private static function has_legacy_featured_image_attrs( array $raw_attrs ): bool {
+		return array_key_exists( 'featuredImage', $raw_attrs ) && ! array_key_exists( 'image', $raw_attrs );
+	}
+
+	/**
+	 * Normalizes legacy featuredImage attrs into canonical image attrs for rendering.
+	 *
+	 * @param array $attrs Render-time attrs merged with defaults.
+	 * @param array $raw_attrs Raw parsed block attrs.
+	 * @param bool  $has_legacy_featured_image_attrs Whether raw attrs use legacy featuredImage namespace.
+	 *
+	 * @return array
+	 */
+	private static function normalize_featured_image_attrs( array $attrs, array $raw_attrs, bool $has_legacy_featured_image_attrs ): array {
+		if ( ! $has_legacy_featured_image_attrs ) {
+			return $attrs;
+		}
+
+		$legacy_featured_image_attrs = $raw_attrs['featuredImage'] ?? null;
+
+		if ( ! is_array( $legacy_featured_image_attrs ) ) {
+			return $attrs;
+		}
+
+		$attrs['image'] = array_replace_recursive( $attrs['image'] ?? [], $legacy_featured_image_attrs );
+
+		return $attrs;
+	}
+
+	/**
+	 * Resolves the final value of a Post Title meta toggle.
+	 *
+	 * When runtime block attrs omit a toggle key, force it to "off" so module defaults
+	 * cannot re-enable hidden migrated fields during render.
+	 *
+	 * @since ??
+	 *
+	 * @param string     $toggle_key                 Meta toggle key.
+	 * @param array      $merged_meta_value          Merged multiview meta values.
+	 * @param array|null $raw_meta_advanced          Raw runtime `meta.advanced` attrs.
+	 * @param bool       $force_missing_toggles_off  Whether missing keys should be treated as `off`.
+	 *
+	 * @return string
+	 */
+	private static function resolve_meta_toggle_value( string $toggle_key, array $merged_meta_value, ?array $raw_meta_advanced = null, bool $force_missing_toggles_off = false ): string {
+		if ( $force_missing_toggles_off && is_array( $raw_meta_advanced ) && ! array_key_exists( $toggle_key, $raw_meta_advanced ) ) {
+			return 'off';
+		}
+
+		return $merged_meta_value[ $toggle_key ] ?? 'off';
 	}
 
 	/**
@@ -837,12 +926,15 @@ class PostTitleModule implements DependencyInterface {
 	 * @param string         $location The featured image location.
 	 * @param ModuleElements $elements ModuleElements instance.
 	 * @param bool           $has_wrapper Whether to wrap the featured image in a container.
+	 * @param string         $image_attr_name The image attr namespace to render.
 	 *
 	 * @return string The rendered featured image.
 	 */
-	public static function render_featured_image( array $attrs, string $location, ModuleElements $elements, ?bool $has_wrapper = false ): string {
+	public static function render_featured_image( array $attrs, string $location, ModuleElements $elements, ?bool $has_wrapper = false, string $image_attr_name = 'image' ): string {
+		$image_attrs = $attrs[ $image_attr_name ] ?? [];
+
 		$enabled = ModuleUtils::has_value(
-			$attrs['image']['advanced']['enabled'] ?? [],
+			$image_attrs['advanced']['enabled'] ?? [],
 			[
 				'valueResolver' => function ( $value ) {
 					return 'on' === ( $value ?? 'on' );
@@ -854,7 +946,7 @@ class PostTitleModule implements DependencyInterface {
 			return '';
 		}
 
-		$placement = $attrs['image']['advanced']['placement']['desktop']['value'] ?? 'below';
+		$placement = $image_attrs['advanced']['placement']['desktop']['value'] ?? 'below';
 
 		if ( $location !== $placement ) {
 			return '';
@@ -876,7 +968,7 @@ class PostTitleModule implements DependencyInterface {
 				'childrenSanitizer' => 'et_core_esc_previously',
 				'children'          => $elements->render(
 					[
-						'attrName'   => 'image',
+						'attrName'   => $image_attr_name,
 						'tagName'    => 'img',
 						'attributes' => [
 							'class' => $post_featured_image['class'],
@@ -911,7 +1003,7 @@ class PostTitleModule implements DependencyInterface {
 					'class' => [
 						'et_pb_title_featured_container' => true,
 						'et_multi_view_hidden'           => [
-							'attr'          => $attrs['image']['advanced']['enabled'] ?? [],
+							'attr'          => $image_attrs['advanced']['enabled'] ?? [],
 							'valueResolver' => function ( $value ) {
 								return 'on' !== ( $value ?? 'on' ) ? 'add' : 'remove';
 							},

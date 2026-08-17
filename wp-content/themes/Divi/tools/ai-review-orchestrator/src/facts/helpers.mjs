@@ -142,6 +142,43 @@ export const fetchPrCommits = ({ prNumber, repoSlug }) => {
   return Array.isArray(response) ? response : [];
 };
 
+export const fetchPrReviews = ({ prNumber, repoSlug }) => {
+  if (null == prNumber || null == repoSlug) {
+    return [];
+  }
+  const { owner, repo } = parseRepoSlug(repoSlug);
+  if (null == owner || null == repo) {
+    return [];
+  }
+  const response = runJson("gh", [
+    "api",
+    `repos/${owner}/${repo}/pulls/${prNumber}/reviews`,
+    "--paginate",
+    "-H",
+    "Accept: application/vnd.github+json",
+  ]);
+  return Array.isArray(response) ? response : [];
+};
+
+export const extractDiffPaths = (patch) => {
+  if (null == patch || "" === patch) {
+    return [];
+  }
+  const paths = [];
+  String(patch)
+    .split("\n")
+    .forEach((line) => {
+      if (false === line.startsWith("diff --git ")) {
+        return;
+      }
+      const match = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+      if (match) {
+        paths.push(match[1], match[2]);
+      }
+    });
+  return unique(paths);
+};
+
 export const fetchReviewThreads = ({ prNumber, repoSlug }) => {
   if (null == prNumber || null == repoSlug) {
     return [];

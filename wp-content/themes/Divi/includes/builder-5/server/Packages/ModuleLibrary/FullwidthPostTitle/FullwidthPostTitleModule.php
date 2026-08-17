@@ -572,6 +572,9 @@ class FullwidthPostTitleModule implements DependencyInterface {
 
 		$post_featured_image     = PostTitleModule::get_featured_image();
 		$post_featured_image_src = $post_featured_image['src'] ?? '';
+		$raw_meta_advanced       = is_array( $block->parsed_block['attrs']['meta']['advanced'] ?? null )
+			? $block->parsed_block['attrs']['meta']['advanced']
+			: null;
 
 		return Module::render(
 			[
@@ -600,7 +603,7 @@ class FullwidthPostTitleModule implements DependencyInterface {
 							],
 						]
 					),
-					PostTitleModule::render_featured_image( $attrs, 'above', $elements, true ),
+					PostTitleModule::render_featured_image( $attrs, 'above', $elements, true, 'featuredImage' ),
 					HTMLUtility::render(
 						[
 							'tag'               => 'div',
@@ -611,11 +614,11 @@ class FullwidthPostTitleModule implements DependencyInterface {
 							'childrenSanitizer' => 'et_core_esc_previously',
 							'children'          => [
 								PostTitleModule::render_title( $attrs, $elements ),
-								PostTitleModule::render_meta( $attrs, $elements ),
+								PostTitleModule::render_meta( $attrs, $elements, $raw_meta_advanced, false ),
 							],
 						]
 					),
-					PostTitleModule::render_featured_image( $attrs, 'below', $elements, true ),
+					PostTitleModule::render_featured_image( $attrs, 'below', $elements, true, 'featuredImage' ),
 				],
 			]
 		);

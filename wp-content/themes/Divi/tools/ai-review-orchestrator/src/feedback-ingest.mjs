@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { spawnSync } from "child_process";
 import dotenv from "dotenv";
+import { loadConfig } from "./core/config.mjs";
 import {
   getDefaultDbPath,
   openDb,
@@ -163,6 +164,8 @@ const parseDate = (value) => {
   return parsed;
 };
 
+const DEFAULT_EXCLUDED_AUTHORS = ["deephiveet", "etstaging"];
+
 const isBotUser = (user) => {
   if (null == user) {
     return false;
@@ -174,6 +177,26 @@ const isBotUser = (user) => {
     return true;
   }
   return false;
+};
+
+const normalizeLoginSet = (values) =>
+  new Set(
+    (values || [])
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+const resolveExcludedAuthors = ({ config, extraArg, includeExcluded }) => {
+  if (true === includeExcluded) {
+    return new Set();
+  }
+  const fromConfig = config?.feedback_harvest?.exclude_authors;
+  return normalizeLoginSet([
+    ...DEFAULT_EXCLUDED_AUTHORS,
+    ...(Array.isArray(fromConfig) ? fromConfig : []),
+    config?.feedback_bot_login,
+    ...(extraArg ? extraArg.split(",") : []),
+  ]);
 };
 
 const normalizeTrustedUsers = ({ trustedUsersArg, trustedUserArgs }) => {
@@ -194,6 +217,7 @@ const shouldIncludeAuthor = ({
   trustedUsers,
   includeBots,
   includeAllWhenUntrusted,
+  excludedAuthors,
 }) => {
   if (null == user) {
     return false;
@@ -201,6 +225,9 @@ const shouldIncludeAuthor = ({
   const login = user.login ? user.login.toLowerCase() : "";
   if (0 !== trustedUsers.size) {
     return trustedUsers.has(login);
+  }
+  if (excludedAuthors && true === excludedAuthors.has(login)) {
+    return false;
   }
   if (false === includeBots && true === isBotUser(user)) {
     return false;
@@ -403,6 +430,7 @@ const gatherHumanComments = ({
   trustedUsers,
   includeBots,
   includeAllWhenUntrusted,
+  excludedAuthors,
   minLength,
 }) => {
   const issueComments = fetchIssueComments({ repoSlug, prNumber });
@@ -415,6 +443,7 @@ const gatherHumanComments = ({
       trustedUsers,
       includeBots,
       includeAllWhenUntrusted,
+      excludedAuthors,
     })
   );
   const filteredReview = reviewComments.filter((comment) =>
@@ -423,6 +452,7 @@ const gatherHumanComments = ({
       trustedUsers,
       includeBots,
       includeAllWhenUntrusted,
+      excludedAuthors,
     })
   );
   const filteredReviews = reviews.filter((review) =>
@@ -431,6 +461,7 @@ const gatherHumanComments = ({
       trustedUsers,
       includeBots,
       includeAllWhenUntrusted,
+      excludedAuthors,
     })
   );
 
@@ -470,6 +501,12 @@ const main = async () => {
   const includeAllWhenUntrusted = hasArg("--include-all")
     ? true
     : 0 === trustedUsers.size;
+  const config = loadConfig(repoRoot);
+  const excludedAuthors = resolveExcludedAuthors({
+    config,
+    extraArg: getArgValue("--exclude-authors"),
+    includeExcluded: hasArg("--include-excluded-authors"),
+  });
   const useDb = false === hasArg("--no-db");
   const dbArg = getArgValue("--db");
   const dbContext = useDb ? openDb({ repoRoot, dbPath: dbArg }) : null;
@@ -493,6 +530,7 @@ const main = async () => {
   }
 
   log(`db: ${dbContext?.dbPath ?? getDefaultDbPath(repoRoot)}`);
+  log(`excluded authors: ${[...excludedAuthors].join(", ") || "(none)"}`);
 
   const prs = prNumbers.length
     ? prNumbers
@@ -511,7 +549,7 @@ const main = async () => {
       continue;
     }
     const prId = db
-      ? upsertPr(db, {
+      ?         upsertPr(db, {
           repo: repoSlug,
           number: pr.number,
           title: pr.title,
@@ -523,6 +561,7 @@ const main = async () => {
           closed_at: pr.closed_at ?? null,
           created_at: pr.created_at ?? null,
           updated_at: pr.updated_at ?? null,
+          body: pr.body ? String(pr.body).slice(0, 8000) : null,
         })
       : null;
     const comments = gatherHumanComments({
@@ -531,6 +570,7 @@ const main = async () => {
       trustedUsers,
       includeBots,
       includeAllWhenUntrusted,
+      excludedAuthors,
       minLength: minCommentLength,
     });
     if (db && prId) {
@@ -584,6 +624,7 @@ const main = async () => {
     limit,
     prs: prs.length,
     trusted_users: [...trustedUsers],
+    excluded_authors: [...excludedAuthors],
     include_bots: includeBots,
     min_comment_length: minCommentLength,
     db_enabled: useDb,

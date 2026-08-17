@@ -94,6 +94,10 @@ class LayoutStyle {
 
 		$attr_normalized = self::normalize_attr( $attr, $args['defaultPrintedStyleAttr'] ?? [] );
 
+		// Resolve variables before style_statements so string returnType inline child selectors
+		// and array returnType child selector rules both receive var(--gvid-xxx) columnGap values.
+		$attr_normalized = StyleUtils::resolve_dynamic_variables_recursive( $attr_normalized );
+
 		$is_inside_sticky_module   = $args['isInsideStickyModule'] ?? false;
 		$sticky_parent_order_class = $args['stickyParentOrderClass'] ?? null;
 
@@ -161,11 +165,6 @@ class LayoutStyle {
 				'atRules'                 => $args['atRules'],
 			]
 		);
-
-		// Resolve variables in $attr_normalized before child selector loop processes it.
-		// This ensures columnGap values are resolved to CSS variables (var(--gvid-xxx))
-		// instead of raw variable strings ($variable(...)$) in the child selector CSS output.
-		$attr_normalized = StyleUtils::resolve_dynamic_variables_recursive( $attr_normalized );
 
 		// For array return type, we need to generate child selector rules separately to prevent
 		// Style::add() from merging them with parent declarations (CSS corruption).

@@ -657,6 +657,98 @@ class ImageModule implements DependencyInterface {
 
 
 	/**
+	 * Comma-separated selectors for Grow to Fill dimension styles when lightbox wraps the image.
+	 *
+	 * Open in Lightbox inserts an anchor between the module root and `.et_pb_image_wrap`.
+	 *
+	 * @since ??
+	 *
+	 * @param string $order_class Module order class.
+	 *
+	 * @return string
+	 */
+	public static function grow_to_fill_dimension_selectors( string $order_class ): string {
+		return implode(
+			', ',
+			[
+				"{$order_class} img",
+				"{$order_class} .et_pb_image_wrap",
+			]
+		);
+	}
+
+
+	/**
+	 * Comma-separated selectors for Grow to Fill flex styles when lightbox wraps the image.
+	 *
+	 * @since ??
+	 *
+	 * @param string $order_class Module order class.
+	 *
+	 * @return string
+	 */
+	public static function grow_to_fill_flex_selectors( string $order_class ): string {
+		return implode(
+			', ',
+			[
+				$order_class,
+				"{$order_class} .et_pb_image_wrap",
+			]
+		);
+	}
+
+
+	/**
+	 * Grow to Fill styles for the lightbox anchor between the module root and `.et_pb_image_wrap`.
+	 *
+	 * D4 sets `display: block; position: relative` on overlay lightbox links. Grow to Fill needs a flex
+	 * column chain through the anchor so sizing and magnificPopup click handling stay on the same element.
+	 *
+	 * @since ??
+	 *
+	 * @param array $params {
+	 *     An array of arguments.
+	 *
+	 *     @type array $attrValue Optional. The value (breakpoint > state > value) of the module attribute. Default `[]`.
+	 *     @type bool  $includeFlexGrow Optional. Whether to emit flex-grow. Default `true`.
+	 * }
+	 *
+	 * @return string
+	 */
+	public static function grow_to_fill_lightbox_link_style_declaration( array $params ): string {
+		$attr_value        = $params['attrValue'] ?? [];
+		$include_flex_grow = $params['includeFlexGrow'] ?? true;
+		$is_grow_to_fill   = isset( $attr_value['size'] ) && is_array( $attr_value['size'] ) && in_array( 'flexGrow', $attr_value['size'], true );
+
+		if ( ! $is_grow_to_fill ) {
+			return '';
+		}
+
+		$style_declarations = new StyleDeclarations(
+			[
+				'returnType' => 'string',
+				'important'  => false,
+			]
+		);
+
+		$style_declarations->add( 'display', 'flex' );
+		$style_declarations->add( 'flex-direction', 'column' );
+		$style_declarations->add( 'position', 'relative' );
+		$style_declarations->add( 'min-height', '0' );
+		$style_declarations->add( 'min-width', '0' );
+		$style_declarations->add( 'width', '100%' );
+		$style_declarations->add( 'height', '100%' );
+
+		if ( $include_flex_grow ) {
+			$style_declarations->add( 'flex-grow', '1' );
+			$style_declarations->add( 'flex-shrink', '0' );
+		}
+
+		return $style_declarations->value();
+	}
+
+
+	/**
 	 * Sizing flex style declaration.
 	 *
 	 * This function is responsible for declaring the flex style for the Image module.
@@ -929,6 +1021,7 @@ class ImageModule implements DependencyInterface {
 		$elements              = $args['elements'];
 		$settings              = $args['settings'] ?? [];
 		$is_parent_flex_layout = ! empty( $args['isParentFlexLayout'] );
+		$is_lightbox_enabled   = 'on' === ( $attrs['image']['advanced']['lightbox']['desktop']['value'] ?? 'off' );
 
 		// Get parent layout type information.
 		$is_parent_grid_layout = $elements->get_is_parent_grid_layout();
@@ -996,32 +1089,32 @@ class ImageModule implements DependencyInterface {
 										[
 											'componentName' => 'divi/common',
 											'props' => [
-												'selector' => implode(
-													', ',
-													[
-														"{$args['orderClass']} img",
-														"{$args['orderClass']} .et_pb_image_wrap",
-													]
-												),
-												'attr'     => $attrs['module']['advanced']['sizing'] ?? [],
+												'selector'            => self::grow_to_fill_dimension_selectors( $args['orderClass'] ),
+												'attr'                => $attrs['module']['advanced']['sizing'] ?? [],
 												'declarationFunction' => [ self::class, 'fullwidth_image_style_declaration' ],
 											],
 										],
 										$is_parent_flex_layout ? [
 											'componentName' => 'divi/common',
 											'props' => [
-												'selector' => implode(
-													', ',
-													[
-														"{$args['orderClass']}",
-														"{$args['orderClass']} .et_pb_image_wrap",
-													]
-												),
-												'attr'     => $attrs['module']['advanced']['sizing'] ?? [],
+												'selector'            => self::grow_to_fill_flex_selectors( $args['orderClass'] ),
+												'attr'                => $attrs['module']['advanced']['sizing'] ?? [],
 												'declarationFunction' => static function ( $params ) {
 													$params['includeDisplay'] = false;
 
 													return self::sizing_flex_style_declaration( $params );
+												},
+											],
+										] : null,
+										$is_lightbox_enabled ? [
+											'componentName' => 'divi/common',
+											'props' => [
+												'selector' => "{$args['orderClass']} a.et_pb_lightbox_image",
+												'attr'     => $attrs['module']['advanced']['sizing'] ?? [],
+												'declarationFunction' => static function ( $params ) use ( $is_parent_flex_layout ) {
+													$params['includeFlexGrow'] = $is_parent_flex_layout;
+
+													return self::grow_to_fill_lightbox_link_style_declaration( $params );
 												},
 											],
 										] : null,

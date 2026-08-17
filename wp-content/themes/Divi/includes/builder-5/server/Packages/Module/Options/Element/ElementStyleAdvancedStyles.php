@@ -16,15 +16,18 @@ use ET\Builder\Packages\Module\Layout\Components\StyleCommon\CommonStyle;
 use ET\Builder\Packages\Module\Options\Background\BackgroundStyle;
 use ET\Builder\Packages\Module\Options\Border\BorderStyle;
 use ET\Builder\Packages\Module\Options\BoxShadow\BoxShadowStyle;
+use ET\Builder\Packages\Module\Options\Button\ButtonStyle;
 use ET\Builder\Packages\Module\Options\Css\CssStyle;
 use ET\Builder\Packages\Module\Options\DisabledOn\DisabledOnStyle;
 use ET\Builder\Packages\Module\Options\Dividers\DividersStyle;
 use ET\Builder\Packages\Module\Options\Filters\FiltersStyle;
+use ET\Builder\Packages\Module\Options\Fit\FitStyle;
 use ET\Builder\Packages\Module\Options\Font\FontStyle;
 use ET\Builder\Packages\Module\Options\FontBodyGroup\FontBodyStyle;
 use ET\Builder\Packages\Module\Options\FontHeaderGroup\FontHeaderStyle;
 use ET\Builder\Packages\Module\Options\Icon\IconStyle;
 use ET\Builder\Packages\Module\Options\Layout\LayoutStyle;
+use ET\Builder\Packages\Module\Options\Order\OrderStyle;
 use ET\Builder\Packages\Module\Options\Overflow\OverflowStyle;
 use ET\Builder\Packages\Module\Options\Position\PositionStyle;
 use ET\Builder\Packages\Module\Options\Sizing\SizingStyle;
@@ -32,6 +35,7 @@ use ET\Builder\Packages\Module\Options\Spacing\SpacingStyle;
 use ET\Builder\Packages\Module\Options\Text\TextStyle;
 use ET\Builder\Packages\Module\Options\TextShadow\TextShadowStyle;
 use ET\Builder\Packages\Module\Options\Transform\TransformStyle;
+use ET\Builder\Packages\Module\Options\Transition\TransitionStyle;
 use ET\Builder\Packages\Module\Options\ZIndex\ZIndexStyle;
 use ET\Builder\Packages\ModuleLibrary\Image\Styles\Sizing\SizingStyle as ImageSizingStyle;
 use ET\Builder\Packages\ModuleLibrary\Image\Styles\Spacing\SpacingStyle as ImageSpacingStyle;
@@ -114,12 +118,19 @@ class ElementStyleAdvancedStyles {
 		$style_component_map = [
 			'divi/background'    => [
 				'component' => BackgroundStyle::class,
+				'propName'  => 'background',
 			],
 			'divi/border'        => [
 				'component' => BorderStyle::class,
+				'propName'  => 'border',
 			],
 			'divi/boxShadow'     => [
 				'component' => BoxShadowStyle::class,
+				'propName'  => 'boxShadow',
+			],
+			'divi/button'        => [
+				'component' => ButtonStyle::class,
+				'propName'  => 'button',
 			],
 			'divi/common'        => [
 				'component' => CommonStyle::class,
@@ -129,30 +140,42 @@ class ElementStyleAdvancedStyles {
 			],
 			'divi/disabledOn'    => [
 				'component' => DisabledOnStyle::class,
+				'propName'  => 'disabledOn',
 			],
 			'divi/dividers'      => [
 				'component' => DividersStyle::class,
 			],
+			'divi/fit'           => [
+				'component' => FitStyle::class,
+				'propName'  => 'fit',
+			],
 			'divi/filters'       => [
 				'component' => FiltersStyle::class,
+				'propName'  => 'filters',
 			],
 			'divi/font'          => [
 				'component' => FontStyle::class,
+				'propName'  => 'font',
 			],
 			'divi/fontBody'      => [
 				'component' => FontBodyStyle::class,
+				'propName'  => 'bodyFont',
 			],
 			'divi/font-body'     => [
 				'component' => FontBodyStyle::class,
+				'propName'  => 'bodyFont',
 			],
 			'divi/fontHeader'    => [
 				'component' => FontHeaderStyle::class,
+				'propName'  => 'headingFont',
 			],
 			'divi/font-header'   => [
 				'component' => FontHeaderStyle::class,
+				'propName'  => 'headingFont',
 			],
 			'divi/icon'          => [
 				'component' => IconStyle::class,
+				'propName'  => 'icon',
 			],
 			'divi/image-sizing'  => [
 				'component' => ImageSizingStyle::class,
@@ -162,18 +185,27 @@ class ElementStyleAdvancedStyles {
 			],
 			'divi/layout'        => [
 				'component' => LayoutStyle::class,
+				'propName'  => 'layout',
 			],
-			'divi/overFlow'      => [
+			'divi/order'         => [
+				'component' => OrderStyle::class,
+				'propName'  => 'order',
+			],
+			'divi/overflow'      => [
 				'component' => OverflowStyle::class,
+				'propName'  => 'overflow',
 			],
 			'divi/position'      => [
 				'component' => PositionStyle::class,
+				'propName'  => 'position',
 			],
 			'divi/sizing'        => [
 				'component' => SizingStyle::class,
+				'propName'  => 'sizing',
 			],
 			'divi/spacing'       => [
 				'component' => SpacingStyle::class,
+				'propName'  => 'spacing',
 			],
 			'divi/text'          => [
 				'component' => TextStyle::class,
@@ -183,9 +215,15 @@ class ElementStyleAdvancedStyles {
 			],
 			'divi/transform'     => [
 				'component' => TransformStyle::class,
+				'propName'  => 'transform',
+			],
+			'divi/transition'    => [
+				'component' => TransitionStyle::class,
+				'propName'  => 'transition',
 			],
 			'divi/zIndex'        => [
 				'component' => ZIndexStyle::class,
+				'propName'  => 'zIndex',
 			],
 		];
 

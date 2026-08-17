@@ -15,7 +15,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * `SpacingStyle` class.
  *
- * This class defines the spacing style for Image module.
+ * Image spacing style wrapper. Declaration logic delegates to StyleLibrary Spacing.
  *
  * @since ??
  */

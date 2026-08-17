@@ -336,6 +336,13 @@ class DynamicAssetsListBuilder {
 			if ( ! $this->feature_state->use_fa_icons ) {
 				$this->feature_state->use_fa_icons = ( $this->dependency_checker->check_for_dependency( DynamicAssetsUtils::get_font_icon_modules(), $this->detection_state->processed_modules ) && DetectFeature::has_icon_font( $this->content->get_all_content(), 'fa', $this->detection_state->options ) );
 			}
+
+			// The Payment Button module uses a FontAwesome icon ( PayPal ) as its default. Because this
+			// default is not serialized into the saved post content, the icon-font detection above cannot
+			// catch it. Ensure FontAwesome is loaded whenever a Payment Button is present on the page.
+			if ( ! $this->feature_state->use_fa_icons ) {
+				$this->feature_state->use_fa_icons = $this->dependency_checker->check_for_dependency( [ 'divi/payment-button' ], $this->detection_state->processed_modules );
+			}
 		}
 
 		// Fix for Font Awesome not loading on empty category pages.

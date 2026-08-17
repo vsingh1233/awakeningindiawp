@@ -474,6 +474,94 @@ return [
             ]
         ]
     ],
+    'charts' => [
+        'module' => [
+            'meta' => [
+                'adminLabel' => [
+                    'desktop' => [
+                        'value' => 'Chart'
+                    ]
+                ]
+            ]
+        ],
+        'chart' => [
+            'advanced' => [
+                'config' => [
+                    'desktop' => [
+                        'value' => [
+                            'type' => 'line',
+                            'showTitle' => 'on',
+                            'showSubtitle' => 'on',
+                            'showLegend' => 'on',
+                            'showLegendTitle' => 'off',
+                            'showTooltip' => 'on'
+                        ]
+                    ]
+                ],
+                'title' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'textAlign' => 'center'
+                            ]
+                        ]
+                    ]
+                ],
+                'subtitle' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'textAlign' => 'center'
+                            ]
+                        ]
+                    ]
+                ],
+                'legend' => [
+                    'layout' => [
+                        'desktop' => [
+                            'value' => [
+                                'position' => 'top',
+                                'align' => 'center'
+                            ]
+                        ]
+                    ],
+                    'markers' => [
+                        'desktop' => [
+                            'value' => [
+                                'padding' => '10px',
+                                'usePointStyle' => 'off',
+                                'pointStyle' => 'circle',
+                                'boxWidth' => '40px',
+                                'boxHeight' => '12px'
+                            ]
+                        ]
+                    ]
+                ],
+                'tooltip' => [
+                    'box' => [
+                        'desktop' => [
+                            'value' => [
+                                'backgroundColor' => 'rgba(0, 0, 0, 0.8)',
+                                'borderColor' => 'rgba(0, 0, 0, 0)',
+                                'borderWidth' => '0px',
+                                'cornerRadius' => '6px',
+                                'padding' => '6px'
+                            ]
+                        ]
+                    ],
+                    'colorBoxes' => [
+                        'desktop' => [
+                            'value' => [
+                                'displayColors' => 'on',
+                                'boxWidth' => '12px',
+                                'boxHeight' => '12px'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ],
     'circle-counter' => [
         'module' => [
             'meta' => [
@@ -2178,6 +2266,75 @@ return [
             ]
         ]
     ],
+    'gravity-forms' => [
+        'module' => [
+            'meta' => [
+                'adminLabel' => [
+                    'desktop' => [
+                        'value' => 'Gravity Forms'
+                    ]
+                ]
+            ]
+        ],
+        'gravityForm' => [
+            'advanced' => [
+                'useAjax' => [
+                    'desktop' => [
+                        'value' => 'off'
+                    ]
+                ],
+                'showValidationMessagesPreview' => [
+                    'desktop' => [
+                        'value' => 'off'
+                    ]
+                ],
+                'showConfirmationMessagePreview' => [
+                    'desktop' => [
+                        'value' => 'off'
+                    ]
+                ]
+            ]
+        ],
+        'button' => [
+            'decoration' => [
+                'button' => [
+                    'desktop' => [
+                        'value' => [
+                            'icon' => [
+                                'enable' => 'off'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'nextButton' => [
+            'decoration' => [
+                'button' => [
+                    'desktop' => [
+                        'value' => [
+                            'icon' => [
+                                'enable' => 'off'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'previousButton' => [
+            'decoration' => [
+                'button' => [
+                    'desktop' => [
+                        'value' => [
+                            'icon' => [
+                                'enable' => 'off'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ],
     'group' => [
         'module' => [
             'meta' => [
@@ -2451,6 +2608,17 @@ return [
                         'value' => [
                             'use' => 'off'
                         ]
+                    ]
+                ]
+            ]
+        ]
+    ],
+    'imagely-gallery' => [
+        'module' => [
+            'meta' => [
+                'adminLabel' => [
+                    'desktop' => [
+                        'value' => 'Imagely Gallery'
                     ]
                 ]
             ]
@@ -2939,6 +3107,67 @@ return [
             ]
         ]
     ],
+    'payment-button' => [
+        'module' => [
+            'meta' => [
+                'adminLabel' => [
+                    'desktop' => [
+                        'value' => 'Payment Button'
+                    ]
+                ]
+            ],
+            'advanced' => [
+                'html' => [
+                    'desktop' => [
+                        'value' => [
+                            'elementType' => 'a'
+                        ]
+                    ]
+                ],
+                'text' => [
+                    'text' => [
+                        'desktop' => [
+                            'value' => [
+                                'color' => 'light'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'button' => [
+            'decoration' => [
+                'button' => [
+                    'desktop' => [
+                        'value' => [
+                            'icon' => [
+                                'enable' => 'on',
+                                'onHover' => 'off',
+                                'placement' => 'left',
+                                'settings' => [
+                                    'unicode' => '&#xf1ed;',
+                                    'type' => 'fa',
+                                    'weight' => '400'
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ],
+            'innerContent' => [
+                'desktop' => [
+                    'value' => [
+                        'provider' => 'paypal',
+                        'environment' => 'sandbox',
+                        'amountMode' => 'fixed',
+                        'amount' => '10.00',
+                        'currency' => 'USD',
+                        'openInNewTab' => 'off'
+                    ]
+                ]
+            ]
+        ]
+    ],
     'portfolio' => [
         'module' => [
             'meta' => [
@@ -3036,6 +3265,86 @@ return [
         ]
     ],
     'post-content' => [],
+    'post-filter' => [
+        'module' => [
+            'meta' => [
+                'adminLabel' => [
+                    'desktop' => [
+                        'value' => 'Post Filter'
+                    ]
+                ]
+            ],
+            'advanced' => [
+                'filters' => [
+                    'desktop' => [
+                        'value' => [
+                            'applyMode' => 'submit',
+                            'relation' => 'and'
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'button' => [
+            'decoration' => [
+                'button' => [
+                    'desktop' => [
+                        'value' => [
+                            'icon' => [
+                                'enable' => 'on'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ],
+    'post-filter-item' => [
+        'module' => [
+            'decoration' => [
+                'sizing' => [
+                    'desktop' => [
+                        'value' => [
+                            'flexType' => '24_24'
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'field' => [
+            'innerContent' => [
+                'desktop' => [
+                    'value' => [
+                        'type' => 'text',
+                        'fieldValueType' => 'text',
+                        'option' => 'post_content',
+                        'optionsMethod' => 'automatic',
+                        'labelDateFormat' => 'M j, Y'
+                    ]
+                ]
+            ]
+        ],
+        'label' => [
+            'innerContent' => [
+                'desktop' => [
+                    'value' => 'Search'
+                ]
+            ]
+        ],
+        'button' => [
+            'decoration' => [
+                'button' => [
+                    'desktop' => [
+                        'value' => [
+                            'icon' => [
+                                'enable' => 'on'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ],
     'post-nav' => [
         'module' => [
             'meta' => [

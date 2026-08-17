@@ -43,6 +43,13 @@ class ET_Core_PageResource {
 	protected static $_global_timestamp_updated = false;
 
 	/**
+	 * Whether a WooCommerce bulk product edit cache clear is scheduled for shutdown.
+	 *
+	 * @var bool
+	 */
+	protected static $_woocommerce_bulk_edit_cache_clear_scheduled = false;
+
+	/**
 	 * Onload attribute for stylesheet output.
 	 *
 	 * @var string[]
@@ -940,6 +947,8 @@ class ET_Core_PageResource {
 		// Always delete cached resources for a post upon saving.
 		add_action( 'save_post', array( $class, 'save_post_cb' ), 10, 3 );
 
+		add_action( 'admin_init', array( $class, 'maybe_schedule_woocommerce_bulk_edit_cache_clear' ), 999 );
+
 		// Always delete cached resources for theme customizer upon saving.
 		add_action( 'customize_save_after', array( $class, 'customize_save_after_cb' ) );
 
@@ -1005,8 +1014,9 @@ class ET_Core_PageResource {
 	 */
 	public static function should_force_inline_for_paginated_request() {
 		// PageResource does not know loop settings, so this guard applies to:
-		// 1. actual loop pagination requests (loop-* page > 1), and
-		// 2. WordPress auto-update scrape requests.
+		// 1. actual loop pagination requests (loop-* page > 1),
+		// 2. post-filter param requests (loop_filter-{loopId}[…]),
+		// 3. WordPress auto-update scrape requests.
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only request inspection for cache-safety behavior.
 		if ( ! isset( $_GET ) || ! is_array( $_GET ) ) {
 			return false;
@@ -1021,6 +1031,102 @@ class ET_Core_PageResource {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only request inspection for cache-safety behavior.
 		foreach ( $_GET as $param => $value ) {
 			if ( is_string( $param ) && 0 === strpos( $param, 'loop-' ) && is_numeric( $value ) && (int) $value > 1 ) {
+				return true;
+			}
+		}
+
+		if ( self::_request_has_active_loop_filter_clauses() ) {
+			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Whether the current request includes post-filter params for any loop.
+	 *
+	 * Duplicates builder post-filter detection for cache-safety only. Any non-empty params in a
+	 * `loop_filter-{loopId}` namespace force inline styles, including sort params.
+	 *
+	 * @since 5.10.0
+	 *
+	 * @return bool
+	 */
+	private static function _request_has_active_loop_filter_clauses() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only request inspection for cache-safety behavior.
+		if ( ! isset( $_GET ) || ! is_array( $_GET ) ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only request inspection for cache-safety behavior.
+		foreach ( array_keys( $_GET ) as $namespace_key ) {
+			if ( ! is_string( $namespace_key ) || ! str_starts_with( $namespace_key, 'loop_filter-' ) ) {
+				continue;
+			}
+
+			if ( 'loop_filter-' === $namespace_key ) {
+				continue;
+			}
+
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only request inspection for cache-safety behavior.
+			if ( self::_request_has_loop_filter_params_in_params( $_GET, $namespace_key ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Whether params include active post-filter clauses for one loop filter namespace.
+	 *
+	 * Intentionally omits value sanitization; only non-empty presence is checked for cache safety.
+	 *
+	 * @since 5.10.0
+	 *
+	 * @param array<string,mixed> $params        Request params (for example `$_GET`).
+	 * @param string              $namespace_key Loop filter namespace key (for example `loop_filter-loop-123`).
+	 *
+	 * @return bool
+	 */
+	private static function _request_has_loop_filter_params_in_params( array $params, string $namespace_key ) {
+		if ( ! isset( $params[ $namespace_key ] ) || ! is_array( $params[ $namespace_key ] ) ) {
+			return false;
+		}
+
+		return self::_request_has_post_filter_params( $params[ $namespace_key ] );
+	}
+
+	/**
+	 * Whether submitted loop-filter params include any non-empty values.
+	 *
+	 * @since 5.10.0
+	 *
+	 * @param array<int|string,mixed> $filter_params Request params for one loop filter namespace.
+	 *
+	 * @return bool
+	 */
+	private static function _request_has_post_filter_params( array $filter_params ) {
+		foreach ( $filter_params as $param_key => $param_value ) {
+			// PHP casts numeric query-array keys to integers; cast back before skipping relation.
+			if ( 'relation' === (string) $param_key ) {
+				continue;
+			}
+
+			if ( is_array( $param_value ) ) {
+				$has_value = ! empty(
+					array_filter(
+						$param_value,
+						static function ( $item ) {
+							return '' !== $item && null !== $item;
+						}
+					)
+				);
+			} else {
+				$has_value = '' !== $param_value && null !== $param_value;
+			}
+
+			if ( $has_value ) {
 				return true;
 			}
 		}
@@ -1148,6 +1254,70 @@ class ET_Core_PageResource {
 	}
 
 	/**
+	 * Detect WooCommerce product bulk edit admin request.
+	 *
+	 * @since 5.11.0
+	 *
+	 * @return bool
+	 */
+	protected static function _is_woocommerce_bulk_product_edit_request() {
+		if ( ! is_admin() || ! et_is_woocommerce_plugin_active() ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only request inspection for cache-safety behavior.
+		if ( ! isset( $_REQUEST['post_type'] ) || 'product' !== $_REQUEST['post_type'] ) {
+			return false;
+		}
+
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- Read-only request inspection for cache-safety behavior.
+		$is_edit_action = ( isset( $_REQUEST['action'] ) && 'edit' === $_REQUEST['action'] )
+			|| ( isset( $_REQUEST['action2'] ) && 'edit' === $_REQUEST['action2'] );
+		// phpcs:enable WordPress.Security.NonceVerification.Recommended
+
+		if ( ! $is_edit_action ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only request inspection for cache-safety behavior.
+		if ( empty( $_REQUEST['woocommerce_bulk_edit'] ) ) {
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Schedule a single cache clear at shutdown for WooCommerce bulk product edit.
+	 *
+	 * Mirrors Theme Builder's end-of-save clear in {@see et_theme_builder_api_save()}.
+	 *
+	 * @since 5.11.0
+	 */
+	public static function maybe_schedule_woocommerce_bulk_edit_cache_clear() {
+		if ( self::$_woocommerce_bulk_edit_cache_clear_scheduled ) {
+			return;
+		}
+
+		if ( ! self::_is_woocommerce_bulk_product_edit_request() ) {
+			return;
+		}
+
+		self::$_woocommerce_bulk_edit_cache_clear_scheduled = true;
+
+		add_action( 'shutdown', array( 'ET_Core_PageResource', 'woocommerce_bulk_edit_shutdown_cache_clear_cb' ) );
+	}
+
+	/**
+	 * Clear all static resources once after WooCommerce bulk product edit.
+	 *
+	 * @since 5.11.0
+	 */
+	public static function woocommerce_bulk_edit_shutdown_cache_clear_cb() {
+		self::remove_static_resources( 'all', 'all' );
+	}
+
+	/**
 	 * {@see 'save_post'}
 	 *
 	 * @param int     $post_id
@@ -1159,6 +1329,13 @@ class ET_Core_PageResource {
 		// This prevents creating individual .stale files when a "clear all" operation
 		// triggers a save_post hook (e.g., when clearing cache from Theme Options).
 		if ( self::$_global_timestamp_updated ) {
+			return;
+		}
+
+		// WooCommerce bulk product edit saves many products in one request; skip per-product
+		// cache clears and defer one global clear to shutdown (Theme Builder uses the same pattern).
+		// See https://github.com/elegantthemes/Divi/issues/49033.
+		if ( self::_is_woocommerce_bulk_product_edit_request() ) {
 			return;
 		}
 

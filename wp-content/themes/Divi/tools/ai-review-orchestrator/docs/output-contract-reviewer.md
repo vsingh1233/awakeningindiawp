@@ -92,6 +92,17 @@ and only for material correctness, safety, or maintainability wins. The CI
 workflow may still omit non-blocking findings from PR comments, so if something
 is truly important, mark it **issue (blocking)**.
 
+# Round Completeness
+Round 1 must dump every independent high-impact finding. Do not stop after one
+or two. Later rounds (`review_round` >= 2) only review the delta since the last
+DeepHive review. Empty findings on a follow-up round is the successful outcome
+when prior feedback was addressed and the delta introduces no new defects.
+
+# Satisficing
+Do not raise "more tests" or "add a spec map" when coverage/docs already exist
+and would catch a revert of the change. Do not escalate assertion strictness
+across re-review rounds.
+
 - `findings` can be empty.
 - `confidence` is 0.0 to 1.0.
 - Aggregate locations by theme instead of per-line spam.

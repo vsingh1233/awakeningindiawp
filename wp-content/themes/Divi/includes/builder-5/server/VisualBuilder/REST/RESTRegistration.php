@@ -32,6 +32,11 @@ use ET\Builder\Packages\Module\Options\Loop\QueryOrderBy\QueryOrderByController;
 use ET\Builder\Packages\Module\Options\Loop\QueryTaxonomies\QueryTaxonomiesController;
 use ET\Builder\Packages\Module\Options\Loop\QueryPosts\QueryPostsController;
 use ET\Builder\Packages\Module\Options\WooCommerceSelectProduct\WooCommerceSelectProductController;
+use ET\Builder\Packages\ModuleLibrary\PostFilterItem\PostFilterCustomFieldOptionsController;
+use ET\Builder\Packages\ModuleLibrary\PostFilterItem\PostFilterCustomFieldValueOptionsCacheController;
+use ET\Builder\Packages\ModuleLibrary\PostFilterItem\PostFilterCustomFieldValueOptionsController;
+use ET\Builder\Packages\ModuleLibrary\PostFilterItem\PostFilterFieldListItemsController;
+use ET\Builder\Packages\ModuleLibrary\PostFilterItem\PostFilterProductPriceRangeController;
 use ET\Builder\Packages\ModuleLibrary\Audio\AudioController;
 use ET\Builder\Packages\ModuleLibrary\Breadcrumbs\BreadcrumbsController;
 use ET\Builder\Packages\ModuleLibrary\Blog\BlogController;
@@ -41,14 +46,18 @@ use ET\Builder\Packages\ModuleLibrary\FullwidthPortfolio\FullwidthPortfolioContr
 use ET\Builder\Packages\ModuleLibrary\FullwidthMenu\FullwidthMenuHTMLController;
 use ET\Builder\Packages\ModuleLibrary\FullwidthMenu\FullwidthMenuTermsController;
 use ET\Builder\Packages\ModuleLibrary\Gallery\GalleryController;
+use ET\Builder\Packages\ModuleLibrary\ImagelyGallery\ImagelyGalleryController;
+use ET\Builder\Packages\ModuleLibrary\ImagelyGallery\ImagelyGalleryService;
 use ET\Builder\Packages\ModuleLibrary\Image\ImageController;
 use ET\Builder\Packages\ModuleLibrary\InstagramFeed\InstagramFeedController;
+use ET\Builder\Packages\ModuleLibrary\PaymentButton\PaymentButtonController;
 use ET\Builder\Packages\ModuleLibrary\Menu\MenuHTMLController;
 use ET\Builder\Packages\ModuleLibrary\Menu\MenuTermsController;
 use ET\Builder\Packages\ModuleLibrary\Portfolio\PortfolioController;
 use ET\Builder\Packages\ModuleLibrary\PostNavigation\PostNavigationController;
 use ET\Builder\Packages\ModuleLibrary\Sidebar\SidebarController;
 use ET\Builder\Packages\ModuleLibrary\ContactForm7\ContactForm7Controller;
+use ET\Builder\Packages\ModuleLibrary\GravityForms\GravityFormsController;
 use ET\Builder\Packages\ModuleLibrary\Video\VideoCoverController;
 use ET\Builder\Packages\ModuleLibrary\Video\VideoHTMLController;
 use ET\Builder\Packages\ModuleLibrary\Video\VideoThumbnailController;
@@ -75,6 +84,7 @@ use ET\Builder\VisualBuilder\SettingsData\SettingsDataController;
 use ET\Builder\VisualBuilder\REST\ModuleRender\ModuleRenderController;
 use ET\Builder\VisualBuilder\REST\PageManager\PageManagerController;
 use ET\Builder\VisualBuilder\REST\RecentPosts\RecentPostsController;
+use ET\Builder\VisualBuilder\REST\Announcements\AnnouncementsController;
 use ET\Builder\Packages\ModuleLibrary\WooCommerce\Breadcrumb\WooCommerceBreadcrumbController;
 use ET\Builder\Packages\ModuleLibrary\WooCommerce\CartNotice\WooCommerceCartNoticeController;
 use ET\Builder\Packages\ModuleLibrary\WooCommerce\ProductAddToCart\WooCommerceProductAddToCartController;
@@ -101,6 +111,7 @@ use ET\Builder\Packages\ModuleLibrary\WooCommerce\CheckoutPaymentInfo\WooCommerc
 use ET\Builder\Packages\ModuleLibrary\WooCommerce\CheckoutOrderDetails\WooCommerceCheckoutOrderDetailsController;
 use ET\Builder\Packages\ModuleLibrary\WooCommerce\CrossSells\WooCommerceCrossSellsController;
 use ET\Builder\VisualBuilder\REST\InstagramService\InstagramServiceController;
+use ET\Builder\VisualBuilder\REST\PaymentService\PaymentServiceController;
 
 
 /**
@@ -500,6 +511,20 @@ class RESTRegistration implements DependencyInterface {
 						);
 					}
 
+					if ( class_exists( '\GFForms' ) ) {
+						/**
+						 * Gravity Forms module.
+						 */
+						$router->post(
+							'/gravity-forms/html',
+							[
+								'args'                => [ GravityFormsController::class, 'index_args' ],
+								'callback'            => [ GravityFormsController::class, 'index' ],
+								'permission_callback' => [ GravityFormsController::class, 'index_permission' ],
+							]
+						);
+					}
+
 					/**
 					 * Gallery Module
 					 */
@@ -587,6 +612,33 @@ class RESTRegistration implements DependencyInterface {
 					 * Blog module.
 					 */
 					$router->get( '/blog/types', PostTypeController::class );
+
+					/**
+					 * Imagely Gallery module.
+					 */
+					$router->group(
+						function ( $router ) {
+							if ( ! class_exists( 'C_NextGEN_Bootstrap' ) || ! ImagelyGalleryService::is_runtime_available() ) {
+								return;
+							}
+
+							/**
+							 * The plugin detection class `C_NextGEN_Bootstrap` is intentionally
+							 * kept because that is still the runtime class shipped by the
+							 * (rebranded) Imagely plugin. The gallery list is delivered through
+							 * the settings payload (`SettingsDataCallbacks::imagely_gallery()`
+							 * -> `imagelyGallery` key), so only the preview endpoint is registered here.
+							 */
+							$router->get(
+								'/imagely-gallery/preview',
+								[
+									'args'                => [ ImagelyGalleryController::class, 'preview_args' ],
+									'callback'            => [ ImagelyGalleryController::class, 'preview' ],
+									'permission_callback' => [ ImagelyGalleryController::class, 'preview_permission' ],
+								]
+							);
+						}
+					);
 
 					/**
 					 * Image module.
@@ -690,6 +742,66 @@ class RESTRegistration implements DependencyInterface {
 							'args'                => [ QueryTaxonomiesController::class, 'index_args' ],
 							'callback'            => [ QueryTaxonomiesController::class, 'index' ],
 							'permission_callback' => [ QueryTaxonomiesController::class, 'index_permission' ],
+						]
+					);
+
+					/**
+					 * Post Filter Item custom field option discovery.
+					 */
+					$router->get(
+						'/custom-field-options',
+						[
+							'args'                => [ PostFilterCustomFieldOptionsController::class, 'index_args' ],
+							'callback'            => [ PostFilterCustomFieldOptionsController::class, 'index' ],
+							'permission_callback' => [ PostFilterCustomFieldOptionsController::class, 'index_permission' ],
+						]
+					);
+
+					/**
+					 * Post Filter Item field list items.
+					 */
+					$router->get(
+						'/field-list-items',
+						[
+							'args'                => [ PostFilterFieldListItemsController::class, 'index_args' ],
+							'callback'            => [ PostFilterFieldListItemsController::class, 'index' ],
+							'permission_callback' => [ PostFilterFieldListItemsController::class, 'index_permission' ],
+						]
+					);
+
+					/**
+					 * Post Filter Item custom field value options.
+					 */
+					$router->get(
+						'/custom-field-value-options',
+						[
+							'args'                => [ PostFilterCustomFieldValueOptionsController::class, 'index_args' ],
+							'callback'            => [ PostFilterCustomFieldValueOptionsController::class, 'index' ],
+							'permission_callback' => [ PostFilterCustomFieldValueOptionsController::class, 'index_permission' ],
+						]
+					);
+
+					/**
+					 * Post Filter Item custom field value options cache.
+					 */
+					$router->delete(
+						'/custom-field-value-options/cache',
+						[
+							'args'                => [ PostFilterCustomFieldValueOptionsCacheController::class, 'delete_args' ],
+							'callback'            => [ PostFilterCustomFieldValueOptionsCacheController::class, 'delete' ],
+							'permission_callback' => [ PostFilterCustomFieldValueOptionsCacheController::class, 'delete_permission' ],
+						]
+					);
+
+					/**
+					 * Post Filter Item WooCommerce product price range metadata.
+					 */
+					$router->get(
+						'/product-price-range',
+						[
+							'args'                => [ PostFilterProductPriceRangeController::class, 'index_args' ],
+							'callback'            => [ PostFilterProductPriceRangeController::class, 'index' ],
+							'permission_callback' => [ PostFilterProductPriceRangeController::class, 'index_permission' ],
 						]
 					);
 
@@ -1147,6 +1259,60 @@ class RESTRegistration implements DependencyInterface {
 		);
 
 		/**
+		 * `/payment-button` REST routes.
+		 */
+		$route->post(
+			'/payment-button/read',
+			[
+				'args'                => [ PaymentButtonController::class, 'read_args' ],
+				'callback'            => [ PaymentButtonController::class, 'read' ],
+				'permission_callback' => [ PaymentButtonController::class, 'read_permission' ],
+			]
+		);
+
+		/**
+		 * `/payment-service` REST routes.
+		 */
+		$route
+			->prefix( '/payment-service' )
+			->group(
+				function ( $router ) {
+					$router->post(
+						'/create',
+						[
+							'args'                => [ PaymentServiceController::class, 'create_args' ],
+							'callback'            => [ PaymentServiceController::class, 'create' ],
+							'permission_callback' => [ PaymentServiceController::class, 'create_permission' ],
+						]
+					);
+					$router->post(
+						'/read',
+						[
+							'args'                => [ PaymentServiceController::class, 'read_args' ],
+							'callback'            => [ PaymentServiceController::class, 'read' ],
+							'permission_callback' => [ PaymentServiceController::class, 'read_permission' ],
+						]
+					);
+					$router->post(
+						'/delete',
+						[
+							'args'                => [ PaymentServiceController::class, 'delete_args' ],
+							'callback'            => [ PaymentServiceController::class, 'delete' ],
+							'permission_callback' => [ PaymentServiceController::class, 'delete_permission' ],
+						]
+					);
+					$router->post(
+						'/update',
+						[
+							'args'                => [ PaymentServiceController::class, 'update_args' ],
+							'callback'            => [ PaymentServiceController::class, 'update' ],
+							'permission_callback' => [ PaymentServiceController::class, 'update_permission' ],
+						]
+					);
+				}
+			);
+
+		/**
 		 * `/instagram-service` REST routes.
 		 */
 		$route
@@ -1282,6 +1448,18 @@ class RESTRegistration implements DependencyInterface {
 		 * Recent Posts endpoint.
 		 */
 		$route->get( '/recent-posts', RecentPostsController::class );
+
+		/**
+		 * Announcements endpoints.
+		 */
+		$route->post(
+			'/announcements/mark-read',
+			[
+				'args'                => [ AnnouncementsController::class, 'mark_read_args' ],
+				'callback'            => [ AnnouncementsController::class, 'mark_read' ],
+				'permission_callback' => [ AnnouncementsController::class, 'mark_read_permission' ],
+			]
+		);
 
 		/**
 		 * Page Manager endpoints.

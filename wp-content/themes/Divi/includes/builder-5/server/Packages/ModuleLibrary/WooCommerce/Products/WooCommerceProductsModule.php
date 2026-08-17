@@ -704,14 +704,34 @@ class WooCommerceProductsModule implements DependencyInterface {
 	/**
 	 * Append offset to WooCommerce products query.
 	 *
+	 * When Product Offset is combined with pagination, WP_Query prefers `offset`
+	 * over `paged`, so the SQL start must be advanced manually per page.
+	 *
 	 * @since ??
 	 *
 	 * @param array $query_args WooCommerce query arguments.
 	 *
 	 * @return array Modified query arguments with offset.
+	 *
+	 * @see https://codex.wordpress.org/Making_Custom_Queries_using_Offset_and_Pagination
 	 */
 	public static function append_offset( array $query_args ): array {
-		if ( self::$offset > 0 ) {
+		if ( self::$offset <= 0 ) {
+			return $query_args;
+		}
+
+		/*
+		 * Offset + pagination don't play well. Manual offset calculation required
+		 * so each product-page advances past the module base offset.
+		 *
+		 * @see: https://codex.wordpress.org/Making_Custom_Queries_using_Offset_and_Pagination
+		 */
+		$paged          = isset( $query_args['paged'] ) ? (int) $query_args['paged'] : 0;
+		$posts_per_page = isset( $query_args['posts_per_page'] ) ? (int) $query_args['posts_per_page'] : 0;
+
+		if ( $paged > 1 && $posts_per_page > 0 ) {
+			$query_args['offset'] = ( ( $paged - 1 ) * $posts_per_page ) + self::$offset;
+		} else {
 			$query_args['offset'] = self::$offset;
 		}
 
@@ -750,17 +770,35 @@ class WooCommerceProductsModule implements DependencyInterface {
 	 */
 	public static function adjust_offset_pagination( object $results ): object {
 		if ( self::$offset > 0 ) {
-			// Store original total before adjusting for pagination.
-			$original_total = isset( $results->total ) ? (int) $results->total : 0;
+			/*
+			 * Use returned product IDs for empty detection, not offset >= total.
+			 * With paginate=false (module default), WC sets total to count( $query->posts )
+			 * (page size), not catalog found_posts — so offset > Product Count falsely
+			 * looked "past end" even when products were returned.
+			 */
+			$product_ids = isset( $results->ids ) ? $results->ids : [];
+			$ids_count   = is_array( $product_ids ) ? count( $product_ids ) : 0;
 
-			// Check if offset exceeds or equals total products (no products available after offset).
-			if ( self::$offset >= $original_total ) {
+			if ( empty( $product_ids ) ) {
 				self::$should_show_empty = true;
 			}
 
-			$results->total = max( 0, $results->total - self::$offset );
-			if ( property_exists( $results, 'total_products' ) ) {
-				$results->total_products = max( 0, $results->total_products - self::$offset );
+			/*
+			 * Only subtract offset from catalog-sized totals (paginate=true / found_posts).
+			 * When paginate=false, total === count( ids ). Subtracting offset then zeros
+			 * wc_get_loop_prop( 'total' ) and WC skips rendering despite non-empty ids.
+			 */
+			$original_total = isset( $results->total ) ? (int) $results->total : 0;
+
+			if ( $ids_count < $original_total ) {
+				$results->total = max( 0, $original_total - self::$offset );
+				if ( property_exists( $results, 'total_products' ) ) {
+					$results->total_products = max( 0, (int) $results->total_products - self::$offset );
+				}
+
+				// WC pagination uses total_pages; WP max_num_pages ignores module offset.
+				$per_page             = isset( $results->per_page ) ? max( 1, (int) $results->per_page ) : 1;
+				$results->total_pages = (int) ceil( $results->total / $per_page );
 			}
 		}
 
@@ -974,8 +1012,8 @@ class WooCommerceProductsModule implements DependencyInterface {
 				);
 			}
 
-			// When "current" is used, omit shortcode category parameter to prevent conflict with exact tax_query constraint.
-			if ( $has_current_filter && ! empty( $raw_product_categories ) ) {
+			// When "current" is used with product_category type, omit shortcode category parameter to prevent conflict with exact tax_query constraint.
+			if ( 'product_category' === $type && $has_current_filter && ! empty( $raw_product_categories ) ) {
 				$product_categories = [];
 			}
 		}
@@ -1180,6 +1218,50 @@ class WooCommerceProductsModule implements DependencyInterface {
 	}
 
 	/**
+	 * Apply an exact product_cat tax_query constraint to a products query.
+	 *
+	 * @since ??
+	 *
+	 * @param array $query_args Query array.
+	 * @param array $term_ids   Product category term IDs.
+	 *
+	 * @return array Modified query arguments.
+	 */
+	protected static function _apply_exact_product_cat_tax_query( array $query_args, array $term_ids ): array {
+		if ( empty( $term_ids ) ) {
+			return $query_args;
+		}
+
+		// Avoid conflicting category conditions from shortcode/category filters and enforce
+		// a single exact current-category constraint.
+		if ( is_array( $query_args['tax_query'] ?? null ) ) {
+			$query_args['tax_query'] = array_filter(
+				$query_args['tax_query'],
+				function ( $tax_query_clause ) {
+					return ! is_array( $tax_query_clause ) || 'product_cat' !== ( $tax_query_clause['taxonomy'] ?? '' );
+				}
+			);
+		}
+
+		$exact_current_category_clause = [
+			'taxonomy'         => 'product_cat',
+			'field'            => 'term_id',
+			'terms'            => array_values( array_unique( array_map( 'intval', $term_ids ) ) ),
+			'operator'         => 'IN',
+			// Keep WooCommerce hierarchical taxonomy behavior for parent category archives.
+			'include_children' => true,
+		];
+
+		if ( is_array( $query_args['tax_query'] ?? null ) ) {
+			$query_args['tax_query'][] = $exact_current_category_clause;
+		} else {
+			$query_args['tax_query'] = [ $exact_current_category_clause ];
+		}
+
+		return $query_args;
+	}
+
+	/**
 	 * Filter the products query arguments.
 	 *
 	 * @since ??
@@ -1203,7 +1285,9 @@ class WooCommerceProductsModule implements DependencyInterface {
 
 		$type               = ArrayUtility::get_value( self::$static_props, 'type', 'recent' );
 		$include_categories = ArrayUtility::get_value( self::$static_props, 'include_categories', [] );
+		$use_current_loop   = 'on' === ArrayUtility::get_value( self::$static_props, 'use_current_loop', 'off' );
 		$has_current        = is_array( $include_categories ) && in_array( 'current', $include_categories, true );
+		$current_term_ids   = [];
 
 		if ( 'product_category' === $type && $has_current ) {
 			$current_term_ids = self::_filter_include_categories(
@@ -1211,34 +1295,16 @@ class WooCommerceProductsModule implements DependencyInterface {
 				Style::get_current_post_id_reverse(),
 				'product_cat'
 			);
+		} elseif ( $use_current_loop && is_product_category() ) {
+			$queried_object_id = (int) get_queried_object_id();
 
-			if ( ! empty( $current_term_ids ) ) {
-				// Avoid conflicting category conditions from shortcode/category filters and enforce
-				// a single exact current-category constraint.
-				if ( is_array( $query_args['tax_query'] ?? null ) ) {
-					$query_args['tax_query'] = array_filter(
-						$query_args['tax_query'],
-						function ( $tax_query_clause ) {
-							return ! is_array( $tax_query_clause ) || 'product_cat' !== ( $tax_query_clause['taxonomy'] ?? '' );
-						}
-					);
-				}
-
-				$exact_current_category_clause = [
-					'taxonomy'         => 'product_cat',
-					'field'            => 'term_id',
-					'terms'            => array_values( array_unique( array_map( 'intval', $current_term_ids ) ) ),
-					'operator'         => 'IN',
-					// Keep WooCommerce hierarchical taxonomy behavior for parent category archives.
-					'include_children' => true,
-				];
-
-				if ( is_array( $query_args['tax_query'] ?? null ) ) {
-					$query_args['tax_query'][] = $exact_current_category_clause;
-				} else {
-					$query_args['tax_query'] = [ $exact_current_category_clause ];
-				}
+			if ( $queried_object_id > 0 ) {
+				$current_term_ids = [ $queried_object_id ];
 			}
+		}
+
+		if ( ! empty( $current_term_ids ) ) {
+			$query_args = self::_apply_exact_product_cat_tax_query( $query_args, $current_term_ids );
 		}
 
 		return $query_args;

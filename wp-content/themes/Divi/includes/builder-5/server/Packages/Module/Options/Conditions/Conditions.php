@@ -30,6 +30,134 @@ class Conditions {
 	protected $_custom_current_date;
 
 	/**
+	 * Whether the main query is a singular content request (not an archive, search, or blog index).
+	 *
+	 * Theme Builder layout rendering can spoof the global post, so callers must not infer
+	 * singular context from `ET_Post_Stack::get_main_post_id()` alone on listing queries.
+	 *
+	 * @since ??
+	 *
+	 * @return bool
+	 */
+	private function _is_main_query_singular_content(): bool {
+		global $wp_query;
+
+		if ( ! $wp_query instanceof \WP_Query ) {
+			return false;
+		}
+
+		if ( $wp_query->is_archive || $wp_query->is_search ) {
+			return false;
+		}
+
+		if ( $wp_query->is_home && ! $wp_query->is_front_page ) {
+			return false;
+		}
+
+		return (bool) $wp_query->is_singular;
+	}
+
+	/**
+	 * Whether conditions should treat the current request as singular content.
+	 *
+	 * During Theme Builder layout rendering `is_singular()` can be false even when
+	 * the main query is a singular page/post.
+	 *
+	 * @since ??
+	 *
+	 * @return bool
+	 */
+	private function _is_singular_content_context(): bool {
+		$is_on_shop_page = class_exists( 'WooCommerce' ) && is_shop();
+
+		if ( $is_on_shop_page ) {
+			return true;
+		}
+
+		if ( is_singular() ) {
+			return true;
+		}
+
+		if ( class_exists( '\ET_Theme_Builder_Layout' )
+			&& \ET_Theme_Builder_Layout::is_theme_builder_layout()
+			&& class_exists( '\ET_Post_Stack' )
+			&& $this->_is_main_query_singular_content() ) {
+			$main_post_id = (int) \ET_Post_Stack::get_main_post_id();
+
+			if ( $main_post_id > 0 ) {
+				$post_type = get_post_type( $main_post_id );
+
+				return is_string( $post_type )
+					&& function_exists( 'et_theme_builder_is_layout_post_type' )
+					&& ! et_theme_builder_is_layout_post_type( $post_type );
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Resolve the post ID conditions should evaluate against.
+	 *
+	 * In Theme Builder layout rendering the post stack is spoofed to the layout post.
+	 * Conditions must evaluate against the viewed page/post from the main query.
+	 *
+	 * @since ??
+	 *
+	 * @return int Post ID for singular-content condition evaluation, or 0 if unavailable.
+	 */
+	private function _get_condition_evaluation_post_id(): int {
+		$is_on_shop_page = class_exists( 'WooCommerce' ) && is_shop();
+
+		if ( $is_on_shop_page ) {
+			return (int) wc_get_page_id( 'shop' );
+		}
+
+		if ( class_exists( '\ET_Theme_Builder_Layout' )
+			&& \ET_Theme_Builder_Layout::is_theme_builder_layout()
+			&& class_exists( '\ET_Post_Stack' )
+			&& $this->_is_main_query_singular_content() ) {
+			$main_post_id = (int) \ET_Post_Stack::get_main_post_id();
+
+			if ( $main_post_id > 0 ) {
+				$post_type = get_post_type( $main_post_id );
+
+				if ( is_string( $post_type )
+					&& function_exists( 'et_theme_builder_is_layout_post_type' )
+					&& ! et_theme_builder_is_layout_post_type( $post_type ) ) {
+					return $main_post_id;
+				}
+			}
+		}
+
+		return (int) get_queried_object_id();
+	}
+
+	/**
+	 * Resolve tag selections from D5 `tags` or legacy D4 `categories` key.
+	 *
+	 * Legacy D4 / TB-imported payloads store tag selections under `categories`
+	 * with the same item shape as `tags`.
+	 *
+	 * @since ??
+	 *
+	 * @param array $condition_settings Condition settings array.
+	 *
+	 * @return array Tag items array.
+	 */
+	private function _resolve_tags_condition_items( array $condition_settings ): array {
+		if ( isset( $condition_settings['tags'] ) && is_array( $condition_settings['tags'] ) ) {
+			return $condition_settings['tags'];
+		}
+
+		if ( isset( $condition_settings['categories'] ) && is_array( $condition_settings['categories'] ) ) {
+			return $condition_settings['categories'];
+		}
+
+		return [];
+	}
+
+	/**
 	 * Process the author condition for displaying content.
 	 *
 	 * This function checks if the current page is a singular post and if
@@ -121,15 +249,14 @@ class Conditions {
 	 */
 	protected function _process_author_condition( array $condition_settings ): bool {
 		// Only check for Posts.
-		if ( ! is_singular() ) {
+		if ( ! $this->_is_singular_content_context() ) {
 			return false;
 		}
 
 		$display_rule           = $condition_settings['displayRule'] ?? 'is';
 		$authors_raw            = $condition_settings['authors'] ?? [];
 		$authors_ids            = array_column( $authors_raw, 'value' );
-		$is_on_shop_page        = class_exists( 'WooCommerce' ) && is_shop();
-		$queried_object_id      = $is_on_shop_page ? wc_get_page_id( 'shop' ) : get_queried_object_id();
+		$queried_object_id      = $this->_get_condition_evaluation_post_id();
 		$current_post_author_id = get_post_field( 'post_author', (int) $queried_object_id );
 
 		$should_display = array_intersect( $authors_ids, (array) $current_post_author_id ) ? true : false;
@@ -217,7 +344,7 @@ class Conditions {
 	 */
 	protected function _process_categories_condition( $condition_settings ) {
 
-		if ( ! is_singular() ) {
+		if ( ! $this->_is_singular_content_context() ) {
 			return false;
 		}
 
@@ -234,7 +361,7 @@ class Conditions {
 			$categories_raw
 		);
 
-		$current_queried_id           = get_queried_object_id();
+		$current_queried_id           = $this->_get_condition_evaluation_post_id();
 		$has_post_specified_term      = false;
 		$tax_slugs_of_catch_all_items = [];
 		$is_any_catch_all_selected    = false;
@@ -791,8 +918,10 @@ class Conditions {
 
 		// Determine whether we are on a singular post/page or a taxonomy archive page,
 		// and set the meta type accordingly so the correct meta API is used.
-		if ( is_singular() && $queried_object instanceof \WP_Post ) {
-			$meta_type = 'post';
+		if ( $this->_is_singular_content_context() ) {
+			$queried_object_id = $this->_get_condition_evaluation_post_id();
+			$queried_object    = get_post( $queried_object_id );
+			$meta_type         = 'post';
 		} elseif ( is_tax() || is_category() || is_tag() ) {
 			// On taxonomy archive pages the queried object is a WP_Term.
 			if ( ! $queried_object instanceof \WP_Term ) {
@@ -800,6 +929,10 @@ class Conditions {
 			}
 			$meta_type = 'term';
 		} else {
+			return false;
+		}
+
+		if ( 'post' === $meta_type && ! $queried_object instanceof \WP_Post ) {
 			return false;
 		}
 
@@ -1194,14 +1327,14 @@ class Conditions {
 
 		// Non-singular URLs cannot match selected pages for "is"; "is not" must still pass on archives.
 		// The WooCommerce shop page is non-singular but must resolve against the shop page ID.
-		if ( ! is_singular() && ! $is_on_shop_page ) {
+		if ( ! $this->_is_singular_content_context() && ! $is_on_shop_page ) {
 			return ( 'isNot' === $display_rule );
 		}
 
 		$dynamic_posts_raw = $condition_settings['dynamicPosts'] ?? [];
 		$dynamic_posts_ids = array_column( $dynamic_posts_raw, 'value' );
 
-		$current_page_id = $is_on_shop_page ? wc_get_page_id( 'shop' ) : get_queried_object_id();
+		$current_page_id = $this->_get_condition_evaluation_post_id();
 
 		$should_display = array_intersect( $dynamic_posts_ids, (array) $current_page_id ) ? true : false;
 
@@ -1482,15 +1615,14 @@ class Conditions {
 	 */
 	protected function _process_post_type_condition( array $condition_settings ): bool {
 		// Only check for single post.
-		if ( ! is_singular() ) {
+		if ( ! $this->_is_singular_content_context() ) {
 			return false;
 		}
 
 		$display_rule       = $condition_settings['displayRule'] ?? 'is';
 		$post_types_raw     = $condition_settings['postTypes'] ?? [];
 		$post_types_values  = array_column( $post_types_raw, 'value' );
-		$is_on_shop_page    = class_exists( 'WooCommerce' ) && is_shop();
-		$current_queried_id = $is_on_shop_page ? wc_get_page_id( 'shop' ) : get_queried_object_id();
+		$current_queried_id = $this->_get_condition_evaluation_post_id();
 		$post_type          = get_post_type( $current_queried_id );
 
 		$should_display = array_intersect( $post_types_values, (array) $post_type ) ? true : false;
@@ -1937,7 +2069,7 @@ class Conditions {
 		}
 
 		$display_rule            = $condition_settings['displayRule'] ?? 'is';
-		$tags_raw                = $condition_settings['tags'] ?? [];
+		$tags_raw                = $this->_resolve_tags_condition_items( $condition_settings );
 		$queried_object          = get_queried_object();
 		$is_queried_object_valid = $queried_object instanceof \WP_Term && property_exists( $queried_object, 'taxonomy' );
 
@@ -1985,12 +2117,12 @@ class Conditions {
 	 */
 	protected function _process_tags_condition( $condition_settings ) {
 
-		if ( ! is_singular() ) {
+		if ( ! $this->_is_singular_content_context() ) {
 			return false;
 		}
 
 		$display_rule = isset( $condition_settings['displayRule'] ) ? $condition_settings['displayRule'] : 'is';
-		$tags_raw     = isset( $condition_settings['tags'] ) ? $condition_settings['tags'] : [];
+		$tags_raw     = $this->_resolve_tags_condition_items( $condition_settings );
 
 		$tags = array_map(
 			function ( $item ) {
@@ -2002,7 +2134,7 @@ class Conditions {
 			$tags_raw
 		);
 
-		$current_queried_id           = get_queried_object_id();
+		$current_queried_id           = $this->_get_condition_evaluation_post_id();
 		$has_post_specified_term      = false;
 		$tax_slugs_of_catch_all_items = [];
 		$is_any_catch_all_selected    = false;

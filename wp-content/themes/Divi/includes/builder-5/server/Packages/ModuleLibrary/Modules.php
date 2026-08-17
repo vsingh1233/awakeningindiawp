@@ -18,6 +18,7 @@ use ET\Builder\Framework\DependencyManagement\DependencyTree;
 use ET\Builder\Framework\Utility\Conditions as ConditionsUtility;
 use ET\Builder\Packages\Module\Options\Conditions;
 use ET\Builder\Packages\Module\Options\Loop\LoopHooks;
+use ET\Builder\Packages\ModuleLibrary\PostFilter\PostFilterHooks;
 use ET\Builder\Packages\ModuleLibrary\AccordionItem\AccordionItemModule;
 use ET\Builder\Packages\ModuleLibrary\Accordion\AccordionModule;
 use ET\Builder\Packages\ModuleLibrary\Audio\AudioModule;
@@ -28,7 +29,9 @@ use ET\Builder\Packages\ModuleLibrary\Blog\BlogModule;
 use ET\Builder\Packages\ModuleLibrary\Blurb\BlurbModule;
 use ET\Builder\Packages\ModuleLibrary\Breadcrumbs\BreadcrumbsModule;
 use ET\Builder\Packages\ModuleLibrary\Button\ButtonModule;
+use ET\Builder\Packages\ModuleLibrary\PaymentButton\PaymentButtonModule;
 use ET\Builder\Packages\ModuleLibrary\CanvasPortal\CanvasPortalModule;
+use ET\Builder\Packages\ModuleLibrary\Charts\ChartsModule;
 use ET\Builder\Packages\ModuleLibrary\CTA\CTAModule;
 use ET\Builder\Packages\ModuleLibrary\CircleCounter\CircleCounterModule;
 use ET\Builder\Packages\ModuleLibrary\Code\CodeModule;
@@ -38,6 +41,7 @@ use ET\Builder\Packages\ModuleLibrary\Comments\CommentsModule;
 use ET\Builder\Packages\ModuleLibrary\ContactField\ContactFieldModule;
 use ET\Builder\Packages\ModuleLibrary\ContactForm\ContactFormModule;
 use ET\Builder\Packages\ModuleLibrary\ContactForm7\ContactForm7Module;
+use ET\Builder\Packages\ModuleLibrary\GravityForms\GravityFormsModule;
 use ET\Builder\Packages\ModuleLibrary\CountdownTimer\CountdownTimerModule;
 use ET\Builder\Packages\ModuleLibrary\Divider\DividerModule;
 use ET\Builder\Packages\ModuleLibrary\Dropdown\DropdownModule;
@@ -66,9 +70,12 @@ use ET\Builder\Packages\ModuleLibrary\MapItem\MapItemModule;
 use ET\Builder\Packages\ModuleLibrary\Map\MapModule;
 use ET\Builder\Packages\ModuleLibrary\Menu\MenuModule;
 use ET\Builder\Packages\ModuleLibrary\Group\GroupModule;
+use ET\Builder\Packages\ModuleLibrary\ImagelyGallery\ImagelyGalleryModule;
 use ET\Builder\Packages\ModuleLibrary\NumberCounter\NumberCounterModule;
 use ET\Builder\Packages\ModuleLibrary\Portfolio\PortfolioModule;
 use ET\Builder\Packages\ModuleLibrary\PostContent\PostContentModule;
+use ET\Builder\Packages\ModuleLibrary\PostFilter\PostFilterModule;
+use ET\Builder\Packages\ModuleLibrary\PostFilterItem\PostFilterItemModule;
 use ET\Builder\Packages\ModuleLibrary\PostNavigation\PostNavigationModule;
 use ET\Builder\Packages\ModuleLibrary\PostSlider\PostSliderModule;
 use ET\Builder\Packages\ModuleLibrary\PostTitle\PostTitleModule;
@@ -200,6 +207,7 @@ class Modules {
 		Conditions\ConditionsRenderer::register();
 		Conditions\ConditionsHooks::register();
 		LoopHooks::register();
+		PostFilterHooks::register();
 
 		/**
 		 * Fires after Divi 5 modules have been initialized.
@@ -453,7 +461,9 @@ if ( ConditionsUtility::should_register_all_d5_modules() ) {
 	$dependency_tree->add_dependency( new BlurbModule() );
 	$dependency_tree->add_dependency( new BreadcrumbsModule() );
 	$dependency_tree->add_dependency( new CanvasPortalModule() );
+	$dependency_tree->add_dependency( new ChartsModule() );
 	$dependency_tree->add_dependency( new ButtonModule() );
+	$dependency_tree->add_dependency( new PaymentButtonModule() );
 	$dependency_tree->add_dependency( new GroupCarouselModule() );
 	$dependency_tree->add_dependency( new CTAModule() );
 	$dependency_tree->add_dependency( new CircleCounterModule() );
@@ -464,6 +474,7 @@ if ( ConditionsUtility::should_register_all_d5_modules() ) {
 	$dependency_tree->add_dependency( new ContactFieldModule() );
 	$dependency_tree->add_dependency( new ContactFormModule() );
 	$dependency_tree->add_dependency( new ContactForm7Module() );
+	$dependency_tree->add_dependency( new GravityFormsModule() );
 	$dependency_tree->add_dependency( new CountdownTimerModule() );
 	$dependency_tree->add_dependency( new DividerModule() );
 	$dependency_tree->add_dependency( new DropdownModule() );
@@ -492,9 +503,12 @@ if ( ConditionsUtility::should_register_all_d5_modules() ) {
 	$dependency_tree->add_dependency( new MapModule() );
 	$dependency_tree->add_dependency( new MenuModule() );
 	$dependency_tree->add_dependency( new GroupModule() );
+	$dependency_tree->add_dependency( new ImagelyGalleryModule() );
 	$dependency_tree->add_dependency( new NumberCounterModule() );
 	$dependency_tree->add_dependency( new PortfolioModule() );
 	$dependency_tree->add_dependency( new PostContentModule() );
+	$dependency_tree->add_dependency( new PostFilterModule() );
+	$dependency_tree->add_dependency( new PostFilterItemModule() );
 	$dependency_tree->add_dependency( new PostNavigationModule() );
 	$dependency_tree->add_dependency( new PostSliderModule() );
 	$dependency_tree->add_dependency( new PostTitleModule() );

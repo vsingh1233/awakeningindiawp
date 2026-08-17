@@ -31,6 +31,7 @@ use WP_Block;
 use ET\Builder\Packages\GlobalData\GlobalPresetItemGroup;
 use ET\Builder\Packages\ModuleUtils\ModuleUtils;
 use ET\Builder\Packages\ModuleLibrary\IconList\Styles\FontStyle;
+use ET\Builder\Packages\ModuleLibrary\IconList\Styles\IconFontSizeStyle;
 use ET\Builder\Packages\ModuleLibrary\IconList\Styles\TextStyle;
 
 /**
@@ -251,7 +252,7 @@ class IconListModule implements DependencyInterface {
 										'props'         => [
 											'selector' => $args['orderClass'] . ' .et-pb-icon',
 											'attr'     => isset( $attrs['icon']['advanced']['size'] ) ? $attrs['icon']['advanced']['size'] : null,
-											'property' => 'font-size',
+											'declarationFunction' => [ IconFontSizeStyle::class, 'icon_font_size_declaration' ],
 										],
 									],
 								],

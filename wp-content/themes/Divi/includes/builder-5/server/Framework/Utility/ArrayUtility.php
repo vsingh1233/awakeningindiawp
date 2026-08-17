@@ -145,7 +145,9 @@ class ArrayUtility {
 	 *
 	 * Merging logic:
 	 * - Items with matching unique key values are considered duplicates.
-	 * - Module-level items override preset items with matching unique keys.
+	 * - Module-level items override preset items with matching unique keys for most attributes.
+	 * - For `class` / `style`, duplicate unique-key rows merge values (space / semicolon) so
+	 *   multi-entry Custom Attributes are not collapsed before AttributeUtils separation.
 	 * - All unique items from all sources are preserved.
 	 *
 	 * Supports two structures:
@@ -189,7 +191,9 @@ class ArrayUtility {
 				continue;
 			}
 
-			foreach ( $items_array as $item ) {
+			// Walk each source list in reverse so later rows in one source keep their
+			// natural precedence when duplicates collapse before final array_reverse().
+			foreach ( array_reverse( $items_array ) as $item ) {
 				if ( ! is_array( $item ) ) {
 					continue;
 				}
@@ -201,11 +205,49 @@ class ArrayUtility {
 				}
 				$combination_key = implode( '|', $key_parts );
 
-				// Only add if we haven't seen this combination yet.
+				// First occurrence of this unique-key combination.
 				if ( ! isset( $seen_combinations[ $combination_key ] ) ) {
 					$merged_items[]                        = $item;
-					$seen_combinations[ $combination_key ] = true;
+					$seen_combinations[ $combination_key ] = count( $merged_items ) - 1;
+					continue;
 				}
+
+				// Same name/target (or other unique keys): class/style must merge values,
+				// matching AttributeUtils::merge_attribute_values — otherwise multi-entry
+				// Custom Attributes (e.g. class=blue then class=purple) collapse to one row
+				// before separate_attributes_by_target_element can merge them.
+				$existing_index = $seen_combinations[ $combination_key ];
+				$attribute_name = $item['name'] ?? '';
+
+				if ( 'class' === $attribute_name || 'style' === $attribute_name ) {
+					$higher_priority_value = $merged_items[ $existing_index ]['value'] ?? '';
+					$lower_priority_value  = $item['value'] ?? '';
+
+					if ( 'class' === $attribute_name ) {
+						$existing_classes = array_filter( preg_split( '/\s+/', (string) $lower_priority_value ), 'strlen' );
+						$new_classes      = array_filter( preg_split( '/\s+/', (string) $higher_priority_value ), 'strlen' );
+						$merged_items[ $existing_index ]['value'] = implode(
+							' ',
+							array_unique( array_merge( $existing_classes, $new_classes ) )
+						);
+					} else {
+						// Lower-priority styles must come first so higher-priority declarations stay last.
+						$existing_trimmed = rtrim( (string) $lower_priority_value, " \t\n\r\0\x0B;" );
+						$new_trimmed      = rtrim( (string) $higher_priority_value, " \t\n\r\0\x0B;" );
+						$style_values     = array_values(
+							array_filter(
+								[ $existing_trimmed, $new_trimmed ],
+								static function ( string $value ): bool {
+									return '' !== $value;
+								}
+							)
+						);
+						$merged_items[ $existing_index ]['value'] = empty( $style_values )
+							? ''
+							: implode( '; ', $style_values ) . ';';
+					}
+				}
+				// Non-class/style: keep the first-seen item (module override over presets).
 			}
 		}
 

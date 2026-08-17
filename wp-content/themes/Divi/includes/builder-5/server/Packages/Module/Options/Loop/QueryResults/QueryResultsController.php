@@ -60,7 +60,11 @@ class QueryResultsController extends RESTController {
 			case 'current_page':
 				// In Theme Builder, there's no loop context, so use dummy posts.
 				// When editing archive pages in Visual Builder, use the actual current page loop.
-				if ( Conditions::is_tb_enabled() ) {
+				$main_loop_type = sanitize_key( (string) ( $params['current_page_main_loop_type'] ?? '' ) );
+				if (
+					Conditions::is_tb_context( (int) $params['current_post_id'] )
+					&& ( '' === $main_loop_type || 'singular' === $main_loop_type )
+				) {
 					$result = self::_format_pagination_response(
 						LoopUtils::generate_dummy_posts( $params['posts_per_page'] ?? self::DEFAULT_PER_PAGE ),
 						( $params['posts_per_page'] ?? self::DEFAULT_PER_PAGE ) * 3,
@@ -1035,6 +1039,26 @@ class QueryResultsController extends RESTController {
 			$query_args['meta_query'] = $meta_query;
 		}
 
+		/**
+		 * Filters the WP_Term_Query arguments before executing the loop query.
+		 *
+		 * Allows third-party plugins to modify query arguments based on custom parameters
+		 * sent from the Visual Builder via the `divi.module.layout.childModule.loop.resultsQueryParams` JavaScript filter.
+		 * All query parameters (including custom ones) are available in the $params array.
+		 *
+		 * @since ??
+		 *
+		 * @param array $query_args The WP_Term_Query arguments to be modified.
+		 * @param array $params     All request parameters including custom parameters.
+		 *
+		 * @return array Modified WP_Term_Query arguments.
+		 */
+		$query_args = apply_filters(
+			'divi_module_options_loop_terms_results_query_args',
+			$query_args,
+			$params
+		);
+
 		$term_query = new WP_Term_Query( $query_args );
 		$terms      = [];
 
@@ -1062,20 +1086,10 @@ class QueryResultsController extends RESTController {
 			}
 		}
 
-		// Count total terms for pagination.
-		$count_args = [
-			'taxonomy'   => $taxonomy,
-			'hide_empty' => true,
-			'fields'     => 'count',
-		];
-
-		if ( isset( $params['search'] ) ) {
-			$count_args['search'] = sanitize_text_field( $params['search'] );
-		}
-
-		if ( ! empty( $meta_query ) ) {
-			$count_args['meta_query'] = $meta_query;
-		}
+		// Remove 'number' and 'offset' so wp_count_terms() returns the total term count, not just the page subset.
+		$count_args = $query_args;
+		unset( $count_args['number'], $count_args['offset'] );
+		$count_args['fields'] = 'count';
 
 		$total_terms = wp_count_terms( $count_args );
 
@@ -1121,7 +1135,7 @@ class QueryResultsController extends RESTController {
 			$query_args['search'] = '*' . sanitize_text_field( $params['search'] ) . '*';
 		}
 
-		// Add ordering parameters.
+		// Add loop ordering parameters before post-filter refinements so filter order-by can override.
 		if ( isset( $params['order_by'] ) ) {
 			// Sanitize and validate that this is a supported order_by parameter.
 			$order_by       = sanitize_key( $params['order_by'] );
@@ -1147,6 +1161,22 @@ class QueryResultsController extends RESTController {
 			$order               = 'descending' === $order_param ? 'DESC' : 'ASC';
 			$query_args['order'] = $order;
 		}
+
+		/**
+		 * Filters users query arguments before executing the query.
+		 *
+		 * @since ??
+		 *
+		 * @param array $query_args The WP_User_Query arguments to be modified.
+		 * @param array $params     All request parameters including custom parameters.
+		 *
+		 * @return array Modified WP_User_Query arguments.
+		 */
+		$query_args = apply_filters(
+			'divi_module_options_loop_users_results_query_args',
+			$query_args,
+			$params
+		);
 
 		$user_query = new WP_User_Query( $query_args );
 		$users      = [];
@@ -1183,6 +1213,21 @@ class QueryResultsController extends RESTController {
 	 * @return array Menus query results.
 	 */
 	public static function get_menus_results( array $params ): array {
+		/**
+		 * Filters menus query arguments before executing the query.
+		 *
+		 * @since ??
+		 *
+		 * @param array $params Query parameters.
+		 *
+		 * @return array Modified query parameters.
+		 */
+		$params = apply_filters(
+			'divi_module_options_loop_menus_results_query_args',
+			$params,
+			$params
+		);
+
 		// Accept both 'menu_id' and 'menus' parameters for compatibility.
 		$menu_id = isset( $params['menu_id'] ) ? sanitize_text_field( $params['menu_id'] ) : '';
 		if ( empty( $menu_id ) && isset( $params['menus'] ) ) {
@@ -1251,12 +1296,30 @@ class QueryResultsController extends RESTController {
 
 		$menu_items = $all_menu_items;
 
+		/*
+		 * Limit results to specific menu item IDs if 'include' is provided and is an array,
+		 * allowing the caller to fetch only certain menu entries.
+		 * This filtering ensures that only the requested menu items, identified by their IDs,
+		 * are included in the results—useful for granular queries in loops or REST requests.
+		 */
+		if ( isset( $params['include'] ) && is_array( $params['include'] ) ) {
+			$include_ids = array_map( 'absint', $params['include'] );
+			$menu_items  = array_values(
+				array_filter(
+					$menu_items,
+					static function ( $menu_item ) use ( $include_ids ): bool {
+						return in_array( (int) $menu_item->ID, $include_ids, true );
+					}
+				)
+			);
+		}
+
 		// Handle ordering.
 		$order_by = isset( $params['order_by'] ) ? sanitize_key( $params['order_by'] ) : 'menu_order';
 		$order    = isset( $params['order'] ) ? sanitize_key( $params['order'] ) : 'DESC';
 
 		// Validate order_by against whitelist of supported options.
-		$valid_order_by = [ 'menu_order', 'title', 'id' ];
+		$valid_order_by = [ 'menu_order', 'title', 'id', 'menu_text', 'attr_title', 'classes', 'xfn', 'description' ];
 
 		// If order_by is not valid, default to menu_order.
 		if ( ! in_array( $order_by, $valid_order_by, true ) ) {
@@ -1280,12 +1343,46 @@ class QueryResultsController extends RESTController {
 				$menu_items = array_reverse( $menu_items );
 			}
 			// For descending order (default), keep the original order (which is already descending from WordPress).
-		} elseif ( 'title' === $order_by ) {
+		} elseif ( 'title' === $order_by || 'menu_text' === $order_by ) {
 			// Sort by menu item title (link text) - case-insensitive.
 			usort(
 				$menu_items,
 				static function ( $a, $b ) use ( $order ) {
 					$result = strcasecmp( $a->title, $b->title );
+					return 'DESC' === $order ? -$result : $result;
+				}
+			);
+		} elseif ( 'attr_title' === $order_by ) {
+			usort(
+				$menu_items,
+				static function ( $a, $b ) use ( $order ) {
+					$result = strcasecmp( (string) ( $a->attr_title ?? '' ), (string) ( $b->attr_title ?? '' ) );
+					return 'DESC' === $order ? -$result : $result;
+				}
+			);
+		} elseif ( 'classes' === $order_by ) {
+			usort(
+				$menu_items,
+				static function ( $a, $b ) use ( $order ) {
+					$a_classes = is_array( $a->classes ?? null ) ? implode( ' ', $a->classes ) : (string) ( $a->classes ?? '' );
+					$b_classes = is_array( $b->classes ?? null ) ? implode( ' ', $b->classes ) : (string) ( $b->classes ?? '' );
+					$result    = strcasecmp( $a_classes, $b_classes );
+					return 'DESC' === $order ? -$result : $result;
+				}
+			);
+		} elseif ( 'xfn' === $order_by ) {
+			usort(
+				$menu_items,
+				static function ( $a, $b ) use ( $order ) {
+					$result = strcasecmp( (string) ( $a->xfn ?? '' ), (string) ( $b->xfn ?? '' ) );
+					return 'DESC' === $order ? -$result : $result;
+				}
+			);
+		} elseif ( 'description' === $order_by ) {
+			usort(
+				$menu_items,
+				static function ( $a, $b ) use ( $order ) {
+					$result = strcasecmp( (string) ( $a->description ?? '' ), (string) ( $b->description ?? '' ) );
 					return 'DESC' === $order ? -$result : $result;
 				}
 			);

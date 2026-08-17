@@ -1,3 +1,108 @@
+version 5.11.0 ( updated 08-13-2026 )
+- Fixed Theme Builder Shop page templates not rendering on the frontend with WooCommerce 11.0.
+- Added an Imagely Gallery module to Divi 5 with Visual Builder gallery selection and preview, full design controls, and Dynamic Assets-aware NextGEN resource loading.
+- Added a native Divi 5 Gravity Forms module with Visual Builder preview, settings-driven form selection, and design controls for form output, validation, and paging controls.
+- Fixed an issue where enabling Open in Lightbox on an Image Module with Grow to Fill sizing caused the image to shrink instead of filling its column.
+- Fixed Visual Builder crashes caused by circular Global Color references and prevented those circular references from being created in the Variable Manager.
+- Fixed an issue where the Link module displayed the link URL as visible text when Link Text was blank or reset, and fixed ET icon glyphs that were incorrectly HTML-escaped on the frontend for icon-only links.
+- Fixed DevBot Slack notifications so pull request titles containing HTML tags or.
+- special characters now display correctly instead of breaking the message link.
+- Fixed the first Blog loop post being converted to Divi Builder when a Theme Builder template with a Loop was saved from the page.
+- Fixed the Return to Shop button not appearing on cart pages using Woo Notice and Woo Cart Products modules when the cart was emptied without refreshing the page.
+- Fixed Global Link Variables rejecting SMS links that include a percent-encoded message body in the URL.
+- Added a new Payment Button module with payment-specific settings while preserving Button design and behavior parity.
+- Added a native Divi 5 Gravity Forms module with Visual Builder preview, settings-driven form selection, and design controls for form output, validation, and paging controls.
+- Fixed Circle Counter module margin spacing issues when placed in flex containers without stretch alignment.
+- Added CSS classes for flex alignItems property to Column, Section, Row, and Group modules, enabling better styling control for flexbox layouts.
+- Added a new Charts module with table/CSV data input, multiple chart types, and comprehensive chart element styling controls.
+
+version 5.10.1 ( updated 08-09-2026 )
+- Fixed desktop the breakpoint being zoomed in by default when the widescreen breakpoint was enabled, instead of defaulting to 100% zoom.
+- Fixed list items within text module rich text fields not inherited body text styles.
+
+version 5.10.0 ( updated 08-07-2026 )
+- Fixed Woo Product Gallery Grid pagination so Image Count controls items per page across builder and frontend, and fixed mobile grid overflow after pagination by improving gallery reinit and equal-column grid sizing.
+- Fixed migrated text headings losing module-level regular weight when presets set bold.
+- Fixed an issue where Image module Size controls were unavailable in grid-based Column and Group containers.
+- Fixed Visual Builder left toolbar icons not all showing as active for open panels after reloading a saved workspace.
+- Fixed an issue where the Divider module rendered taller than expected in the Visual Builder when a height smaller than 10px was set, causing a mismatch with the front-end layout.
+- Fixed migrated Image module responsive height handling in both FE and VB: empty tablet/phone values now reset to height: auto, preventing desktop height from cascading to smaller breakpoints.
+- Fixed the Gradient Picker preview staying blank when adding a gradient background while editing an Option Group preset in the Visual Builder.
+- Fixed the Social Media Follow module so the X icon link title correctly displays "Follow on X" instead of "Follow on Facebook" on default layouts.
+- Fixed an issue where a Toggle module placed inside an Accordion module was missing its close icon when opened on the frontend.
+- Fixed an issue where SVG text content could disappear in the SVG module by restoring safe text tag support in sanitizer allowlists.
+- Fixed premade layout gradient migration in mixed shortcode/text content by preserving nested child migration traversal while keeping raw content output intact.
+- Fixed a PHP memory exhaustion error that could occur on large Divi 5 pages when dynamic assets scanned module attributes during rendering.
+- Added a filter that allows skipping dynamic assets detection on specific requests.
+- Fixed Image module outputting invalid empty margin and padding CSS rules on the frontend.
+- Fixed Gallery and other modules failing D4 to Divi 5 migration when layouts contained legacy {font}_all_caps attributes such as caption_all_caps.
+- Fixed Theme Builder layout custom CSS not outputting on search results pages.
+- Fixed missing modules when importing Divi 4 layouts that contain global module instances with nested content.
+- Added a new product updates panel in Visual Builder that lists recently added features.
+- Added options in the workspace panel to disable each icon in the sidebar, such as the new product updates icon.
+- Fixed incorrect column sizing in the Visual Builder when row horizontal gap uses a global variable.
+- Fixed save-after-reload in Theme Builder layout editing, dark workspace on Theme Builder admin, missing right-click menu pointer on Theme Builder admin, and related layout detection edge cases.
+- Fixed the Divi Dashboard Documentation card so Browse All Divi Docs opens the Divi 5 documentation collection instead of Divi 4.
+- Internal documentation only; no customer-facing product change for this pull request.
+- Dynamic Assets generation-off requests now stop cached feature hydration, frontend detection, and related script enqueue while keeping the rendered page on the static CSS path and preserving preview-aware fallback behavior.
+- Dynamic Assets generation-gate evaluation is now memoized for the request so render-time detection callbacks reuse one filtered decision instead of re-running the generation filter on every block or shortcode.
+- Fixed Blog Module crashing in the Visual Builder when the fitVids plugin was unavailable.
+- Fixed Gallery Module appearing blank in the Visual Builder after selecting images.
+- Fixed empty loop results not showing for Button modules when Loop Builder injects a no-results message.
+- Fixed an issue where paginated Theme Builder loops could show the first page of results on all pagination pages after layout migration.
+- Improved PHP test reliability by reusing cached WordPress and Composer dependencies and extending the PHPUnit job timeout.
+- Added comprehensive automated test coverage for Theme Builder-specific module behavior.
+- Fixed Post Content module would inherit unwanted margin-bottom and width styles from a parent Theme Builder.
+- Added Theme Builder Playwright regression coverage for #50525.
+- Fixed #50380 where absolutely positioned Mini Cart canvas sections could disappear after layout width changes.
+- Fixed the Image module's Column Class option not applying to Tablet and Phone views inside the Visual Builder.
+- Breadcrumb module child pages of a static homepage now show a single Home link at the start of the trail.
+- On-load Hide Element with Force Visible = Never stays hidden in the Visual Builder after reload.
+- Deleting an On Load -> Hide Element interaction restores that module in the Visual Builder.
+- Custom Attributes that declare the same class or style name more than once for one target now merge those values on module wrappers without dropping earlier entries or emitting malformed empty-side style output, and the Visual Builder preview keeps the same merged result without the duplicate-row runtime error.
+- Added frontend markup contract tests for Gutenberg layout block public render wrappers.
+- Fixed Interaction Effect Action resetting when selecting Parent, Root, or Children as the target module.
+- Fixed an issue where the Timeline Module's Card Background Image set to Dynamic Content (Featured Image) was not displaying in the Visual Builder when the module was used inside a Loop.
+- Added Layer 2 preset snapshot and integration coverage: shared scenario fixtures, PHP dual-channel CSS snapshots, and Visual Builder harness utilities for blurb, button, text, section, slide (including child-under-slider), and S11 cross-module portable OG resolution. Includes PHP frontend parity so module presets with styleAttrs-only styling emit preset-class CSS on the frontend.
+- Fixed an issue where interactive modules (Circle Counter, Number Counter, Countdown Timer, Lottie, Map, Post Carousel, Toggle, Accordion, Video Slider, etc.) would not initialize or expand correctly in the Visual Builder.
+- Fixed Woo Products pagination showing the same products on every page when Product Offset is set.
+- Fixed a fatal error that occurred when activating the Mercado Pago payments for WooCommerce plugin with Divi 5.
+- Fixed Accordion Item default flex direction to keep Visual Builder and frontend layouts in sync.
+- Fixed an issue where enabling parallax on the Post Slider or Fullwidth Post Slider background caused the background image to disappear.
+- Added lazy loading/deferral for below-the-fold videos, sliders, and maps so they only load when scrolled near the viewport instead of on initial page load.
+- Refined below-the-fold detection to be row-granular within a section (lazy loading only) so tall single-section layouts defer correctly.
+- Fixed deferred local MP4/WebM videos not loading or playing when placed below the fold.
+- Fixed below-the-fold deferral for modules stacked in a single row/column (intra-row lazy-load offset tracking; Generic test page trailing MP4 no longer loads on initial page view).
+- Post Slider now resolves inherited Dark/Light text color and overlay-tint output for widescreen, Tablet Wide, and Phone Wide states so the frontend and Visual Builder stay in sync across explicit and inherited breakpoint values.
+- Post Slider Dark/Light rules now cover the full breakpoint ladder, including widescreen and ultraWide content and overlay output, keep enough cascade specificity to win over overlapping tablet selectors at Tablet Wide, Phone Wide, and Phone, and use compound module-root selectors so arrows, controllers, and post-meta follow the same effective Dark/Light treatment.
+- The Visual Builder now uses CSS-contract default breakpoint mins in visual-builder/packages/app-ui/src/store/states/index.ts (desktop 1025, tabletWide 981, tablet 861, phoneWide 768), derives zoom from the target breakpoint band, keeps page-bar width updates tied to the largest enabled breakpoint, and keeps selected desktop plus larger fluid breakpoints inside the correct styling band.
+- Builder Settings, command-based view changes, and add-module modal positioning now follow the same corrected fluid breakpoint sizing model.
+- Added icon/image alignment option in Blurb module.
+- Fixed Background Gradient settings modal being cut off on small viewports or high browser zoom, so the picker now resizes to fit the screen and scrolls when needed.
+- Added dedicated Theme Builder migration test coverage for D4-to-D5 layout conversion.
+- Fixed duplicate Target Module dropdown entries when editing TB layouts and duplicate global canvas rendering when a canvas is both appended and targeted by an interaction.
+- Fixed page off-canvas canvases rendering in the wrong position and breaking Theme Builder header preset styles when append-below canvases were used alongside a TB header.
+- Internal test coverage only; no customer-facing changelog.
+- Added comprehensive third-party module test fixtures and snapshots (L1–L5) for Divi 5 third-party module registration, conversion, rendering, presets, dynamic content, and custom modal coverage. Fixed D4→D5 conversion module-discovery cache so third-party modules registered after the first conversion pass convert to native D5 blocks instead of falling back to shortcode-module.
+- Fixed Place Order button background color not applying in Theme Builder Visual Builder for the Woo Checkout Payment module.
+- Body text lists now keep nested unordered-list markers when a parent ordered list uses a custom ordered style.
+- Breadcrumbs on Theme Builder author archive templates now show a plain author name instead of a literal <span> tag.
+- Fixed Theme Builder layout IDs failing to resolve during Visual Builder settings bootstrap on REST requests when the current request context had no template assignments.
+- Added tests for dynamic content and fixed the Post Title module showing the wrong title and the author archive dynamic titles showing the wrong post's author.
+- Fixed an issue where Theme Builder Visual Builder loops using the Current Page query type could display one more post than the Posts Per Page setting.
+- Fixed Portfolio Current Category filtering on Project Category archive pages when projects belong to multiple categories.
+- Fixed a front-end fatal error when Icon List icon size used a complex size value in Theme Builder layouts.
+- Fixed a front-end fatal error when a Menu module logo URL was stored as a complex value instead of a string.
+- Fixed a Visual Builder regression where legacy button option-group presets could still show icons on hover when preset icon visibility was disabled.
+- Fixed variation swatches showing the same images for every product when wishlist or compare plugins were active on Theme Builder product category templates.
+- Fixed Theme Builder search header layout breaking when the first search result was a Divi Builder custom post type.
+- Fixed Tooltip modules closed via Interactions so they can be reopened by clicking the trigger again.
+- Fixed Tooltip modules so open tooltip content paints above later page modules instead of being covered by them.
+- Fixed a frontend fatal error that could occur when border radius was stored as a simple value instead of the expected corner settings.
+- Fixed Theme Builder History entries that appeared blank when removing header or footer template parts.
+- Fixed an issue where background color opacity changes on hover were not saved when the desktop color had 0% opacity.
+- Added the Post Filter and Post Filter Item modules, giving site visitors a configurable filter form that refines Divi Loop Builder results in real time through bookmarkable URL parameters.
+
 version 5.9.0 ( updated 07-09-2026 )
 - Added new Grid Editor, enabling the visual creation of advanced grid layouts.
 - Added support for number variables in the grid offset editor.

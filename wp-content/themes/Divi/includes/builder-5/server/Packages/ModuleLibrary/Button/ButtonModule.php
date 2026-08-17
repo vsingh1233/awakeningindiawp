@@ -208,36 +208,47 @@ class ButtonModule implements DependencyInterface {
 			]
 		);
 
-		MultiViewScriptData::set(
-			[
-				'id'            => $id,
-				'name'          => $name,
-				'storeInstance' => $store_instance,
-				'selector'      => $selector,
-				'setContent'    => [
-					[
-						'data'          => $attrs['button']['innerContent'] ?? [],
-						'valueResolver' => function ( $value ) {
-							$text = $value['text'] ?? '';
+		$is_loop_no_results = isset( $attrs['__loop_no_results'] ) && true === $attrs['__loop_no_results'];
 
-							if ( $text ) {
-								$text = ModuleUtils::extract_link_title( $text );
-							}
+		$multi_view_script_data = [
+			'id'            => $id,
+			'name'          => $name,
+			'storeInstance' => $store_instance,
+			'selector'      => $selector,
+			'setVisibility' => [
+				[
+					'data'          => $attrs['button']['innerContent'] ?? [],
+					'valueResolver' => function ( $value ) use ( $is_loop_no_results ) {
+						// Keep loop no-results shells visible even when text/URL are empty.
+						if ( $is_loop_no_results ) {
+							return 'visible';
+						}
 
-							return '' === $text && ! empty( $value['linkUrl'] ) ? esc_url( $value['linkUrl'] ) : esc_attr( $text );
-						},
-					],
+						return empty( $value['text'] ) && empty( $value['linkUrl'] ) ? 'hidden' : 'visible';
+					},
 				],
-				'setVisibility' => [
-					[
-						'data'          => $attrs['button']['innerContent'] ?? [],
-						'valueResolver' => function ( $value ) {
-							return empty( $value['text'] ) && empty( $value['linkUrl'] ) ? 'hidden' : 'visible';
-						},
-					],
+			],
+		];
+
+		// Skip setContent for no-results so Multiview does not overwrite injected markup.
+		if ( ! $is_loop_no_results ) {
+			$multi_view_script_data['setContent'] = [
+				[
+					'data'          => $attrs['button']['innerContent'] ?? [],
+					'valueResolver' => function ( $value ) {
+						$text = $value['text'] ?? '';
+
+						if ( $text ) {
+							$text = ModuleUtils::extract_link_title( $text );
+						}
+
+						return '' === $text && ! empty( $value['linkUrl'] ) ? esc_url( $value['linkUrl'] ) : esc_attr( $text );
+					},
 				],
-			]
-		);
+			];
+		}
+
+		MultiViewScriptData::set( $multi_view_script_data );
 	}
 
 	/**
@@ -313,8 +324,8 @@ class ButtonModule implements DependencyInterface {
 		$link_target_value = $attrs['button']['innerContent']['desktop']['value']['linkTarget'] ?? '';
 		$link_target       = 'on' === $link_target_value ? '_blank' : null;
 
-		// Nothing to output if neither Button Text nor Button URL is defined.
-		if ( empty( $text_value ) && empty( $link_value ) ) {
+		// Nothing to output if neither Button Text, Button URL, nor injected content (e.g. loop no-results) is defined.
+		if ( empty( $text_value ) && empty( $link_value ) && empty( $child_modules_content ) ) {
 			return '';
 		}
 

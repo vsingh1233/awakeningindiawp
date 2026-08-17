@@ -1955,7 +1955,8 @@ class SavingUtility {
 				'd4_key' => 'et_pb_page_gutter_width',
 			],
 			'pageZIndex'                        => [
-				'd4_key' => 'et_pb_page_z_index',
+				'd4_key'    => 'et_pb_page_z_index',
+				'sanitizer' => [ self::class, 'sanitize_page_z_index' ],
 			],
 			'postCategories'                    => [
 				'd4_key' => 'et_pb_post_settings_categories',
@@ -2081,6 +2082,25 @@ class SavingUtility {
 	}
 
 	/**
+	 * Sanitize page z-index. Treat `"auto"` as unset so theme stacking applies (#51130 / #39564).
+	 *
+	 * @since ??
+	 *
+	 * @param mixed $value Raw page z-index from REST or direct save.
+	 *
+	 * @return string Sanitized z-index; empty string when unset or `"auto"`.
+	 */
+	public static function sanitize_page_z_index( $value ): string {
+		$value = sanitize_text_field( $value );
+
+		if ( 'auto' === $value ) {
+			return '';
+		}
+
+		return $value;
+	}
+
+	/**
 	 * Save the page settings.
 	 *
 	 * This function saves the page settings to the database.
@@ -2100,6 +2120,14 @@ class SavingUtility {
 		$mapped_page_settings = self::map_page_settings( $settings );
 		if ( $has_page_gutter_width_is_default && $page_gutter_width_is_default ) {
 			unset( $mapped_page_settings['et_pb_page_gutter_width'] );
+		}
+
+		// `"auto"` means no override (VB default); persist empty so meta is deleted like D4 unset.
+		if (
+			isset( $mapped_page_settings['et_pb_page_z_index'] )
+			&& 'auto' === $mapped_page_settings['et_pb_page_z_index']
+		) {
+			$mapped_page_settings['et_pb_page_z_index'] = '';
 		}
 
 		// Exclude postTitle and postExcerpt from et_builder_update_settings() because they were.

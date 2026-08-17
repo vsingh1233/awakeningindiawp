@@ -88,7 +88,7 @@ Force reviewers:
 ```bash
 node src/index.mjs --mode pr-compare --pr 8082 --repo includes/builder-5 \
   --force-reviewer review-security \
-  --force-reviewers review-performance,review-i18n
+  --force-reviewers review-performance,review-architecture-specs
 ```
 
 Resume summaries from latest run:
@@ -122,7 +122,7 @@ Model overrides (reviewers vs summaries):
 
 ```bash
 node src/index.mjs --mode pr-compare --pr 8082 --repo includes/builder-5 \
-  --reviewer-model gpt-5.1-codex-mini \
+  --reviewer-model gpt-5.4-mini \
   --summary-model gpt-5-nano
 ```
 
@@ -130,7 +130,7 @@ Judge model override (merging multi-run reviewer outputs):
 
 ```bash
 node src/index.mjs --mode pr-compare --pr 8082 --repo includes/builder-5 \
-  --judge-model gpt-5.1-codex-mini
+  --judge-model gpt-5.4-mini
 ```
 
 ## How Reviews Run (Current Behavior)
@@ -152,8 +152,12 @@ The facts stage also:
 - Detects task files (`.cursor/tasks/`, `et/tasks/`, `includes/builder-5/**/tasks/`).
 - Pulls task context from `implementation-plan.md` when present.
 - Falls back to the PR description as task context when no task files exist.
-- Computes change size by counting diff lines (excludes task files and `__snapshots__`).
+- Computes change size by counting diff lines (excludes task files, snapshots,
+  compiled `module.json`, and `_all_modules_*` dumps).
 - Classifies size (`tiny`/`small`/`medium`/`large`/`huge`) via `config.yml`.
+- For PR reruns, builds `retroReview` with `review_round`, prior DeepHive
+  threads/findings, and `diff_since_last_run` (from the last DeepHive review
+  commit SHA on GitHub, falling back to the cached local run).
 - Persists run metadata to `output/<run-id>/run.json`, `facts.json`, and `files/index.json`.
 
 ### 2) Summarization Pipeline
@@ -203,6 +207,13 @@ Each reviewer is executed via Cursor CLI `agent` in **read-only** mode:
 - Reviewers see the change context, summaries, and the output contract.
 - Reviewer input is filtered by `globs` and `keywords` in reviewer frontmatter.
 - Each reviewer receives a focused file list (largest relevant diffs first).
+  Snapshots, compiled `module.json`, and `_all_modules_*` dumps are excluded
+  from that list so they do not crowd out small high-value files.
+- Round 1 inspects more files (`review_rounds.first_pass_max_files`) and is told
+  to dump every independent finding now.
+- Follow-up rounds (`review_round` >= 2) are delta-only: focused files are
+  restricted to `diff_since_last_run` plus unresolved thread paths, and
+  findings outside that delta are dropped. Empty findings is the success case.
 - Runs in parallel by default; use `--sequential` or `--stagger-ms`.
 
 Multiple model runs per reviewer (optional):
@@ -278,6 +289,13 @@ node src/feedback-analyze.mjs --repo elegantthemes/submodule-builder-5 --since 2
 Goal: turn raw feedback into generalized reviewer wisdom by clustering similar
 comments and summarizing the themes into actionable reviewer updates.
 
+Embeddings are grounded, not raw comment text. After ingest, nano normalizes each
+kept comment into a reusable claim (kind, signal, controlled tags) using the
+filename, nearby diff hunk, and a one-line PR summary. The embedding document is
+`KIND / SIGNAL / TAGS / AREA / CLAIM / CODE_SIGNALS / CODE / FEEDBACK`. Full PR
+descriptions are **not** embedded (that clusters by PR, not defect class). Cluster
+rollups keep tag histograms so merge can prefer common + high-signal themes.
+
 ### Flow
 
 1) Ingest PR comments into SQLite:
@@ -286,13 +304,20 @@ comments and summarizing the themes into actionable reviewer updates.
 node src/feedback-ingest.mjs --repo elegantthemes/submodule-builder-5 --since 2026-01-01
 ```
 
-2) Filter + embed comments (writes to SQLite):
+2) Filter, normalize, and embed comments (writes to SQLite):
 
 ```bash
 node src/feedback-embed.mjs --repo elegantthemes/submodule-builder-5 --since 2026-01-01
 ```
 
-Disable nano filter:
+Re-normalize and re-embed already-processed comments (needed after a harvest
+schema change, or to refresh claims/tags):
+
+```bash
+node src/feedback-embed.mjs --repo elegantthemes/submodule-builder-5 --since 2026-01-01 --all
+```
+
+Disable nano filter (path tags + hunk still ground the embedding, but no claim):
 
 ```bash
 node src/feedback-embed.mjs --repo elegantthemes/submodule-builder-5 --since 2026-01-01 --no-nano-filter
@@ -327,6 +352,7 @@ SQLITE_VECTOR_PATH=/path/to/sqlite-vector.dylib \
 SQLITE_VECTOR_ENTRYPOINT=sqlite3_vector_init \
 node src/feedback-cluster.mjs --repo elegantthemes/submodule-builder-5 \
   --dimensions 1536 --k 40 --threshold 880 --min-members 6
+```
 
 Replace previous runs for the same repo/model/dimensions:
 
@@ -335,7 +361,6 @@ SQLITE_VECTOR_PATH=/path/to/sqlite-vector.dylib \
 SQLITE_VECTOR_ENTRYPOINT=sqlite3_vector_init \
 node src/feedback-cluster.mjs --repo elegantthemes/submodule-builder-5 \
   --dimensions 1536 --k 25 --threshold 880 --min-members 2 --replace
-```
 ```
 
 4) Summarize clusters into reviewer updates (writes to SQLite + findings):
@@ -453,7 +478,7 @@ Choose a rewrite model:
 ```bash
 node src/feedback-merge.mjs --output-dir tools/ai-review-orchestrator/output/<run-id>_feedback \
   --rewrite-ai --rewrite-prompt "Use stronger language for critical issues" \
-  --rewrite-model gpt-5.1-codex-mini
+  --rewrite-model gpt-5.4-mini
 ```
 
 Allow creating new reviewers when suggested:
@@ -496,7 +521,7 @@ node src/feedback-merge.mjs --generate-suggestions --cluster-run-id <run-id>
 
 ```bash
 node src/feedback-merge.mjs --generate-suggestions --cluster-run-id <run-id> \
-  --generation-model gpt-5.1-codex-mini
+  --generation-model gpt-5.4-mini
 ```
 
 **Limit number of comments analyzed per cluster:**
@@ -524,6 +549,48 @@ SQLITE_VECTOR_PATH=/path/to/sqlite-vector.dylib \
 node src/feedback-merge.mjs --generate-suggestions --cluster-run-id <run-id> \
   --create-new --decided-by josh
 ```
+
+### Re-running Feedback-X (ready checklist)
+
+Prereqs on this machine:
+- `gh` authenticated
+- `OPENAI_API_KEY` in the environment or `tools/ai-review-orchestrator/.env`
+- sqlite-vector at `/Users/joshronk/Library/SQLite/sqlite-vector.dylib`
+
+Ingest is idempotent (comment upserts). Re-run from the same `--since` to pick up
+new closed PRs, then embed / cluster / merge. Skip `--trusted-users` to include
+all human comments, or pass a comma list to restrict. `DeepHiveET` and
+`etstaging` are skipped by default (`feedback_harvest.exclude_authors` in
+`config.yml`). Use `--include-excluded-authors` only if you want them, or
+`--exclude-authors foo,bar` to add more.
+
+First harvest after this grounded-embed change should use default new-only embed
+(no `--all`). If comments were already embedded as raw bodies, re-run embed with
+`--all` before clustering so vectors include claims, tags, and code context.
+
+```bash
+cd tools/ai-review-orchestrator
+export SQLITE_VECTOR_PATH=/Users/joshronk/Library/SQLite/sqlite-vector.dylib
+export SQLITE_VECTOR_ENTRYPOINT=sqlite3_vector_init
+
+# 1. Ingest closed-PR comments
+node src/feedback-ingest.mjs --repo elegantthemes/submodule-builder-5 --since 2026-01-01
+
+# 2. Filter + embed
+node src/feedback-embed.mjs --repo elegantthemes/submodule-builder-5 --since 2026-01-01
+
+# 3. Cluster (use --replace to overwrite the previous run for this repo/model)
+node src/feedback-cluster.mjs --repo elegantthemes/submodule-builder-5 \
+  --dimensions 1536 --k 25 --threshold 880 --min-members 2 --replace
+
+# 4. Inspect DB, then merge with on-the-fly reviewer suggestions
+node src/feedback-db.mjs --stats
+node src/feedback-merge.mjs --generate-suggestions --cluster-run-id <run-id> \
+  --create-new --decided-by josh
+```
+
+Optional: also ingest `elegantthemes/Divi` / `elegantthemes/submodule-builder`
+if you want cross-repo themes in the same sqlite file.
 
 ## Environment
 

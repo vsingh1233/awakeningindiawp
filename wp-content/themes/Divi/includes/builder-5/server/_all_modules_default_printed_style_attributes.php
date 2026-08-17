@@ -79,6 +79,13 @@ return [
     'accordion-item' => [
         'module' => [
             'decoration' => [
+                'layout' => [
+                    'desktop' => [
+                        'value' => [
+                            'flexDirection' => 'column'
+                        ]
+                    ]
+                ],
                 'position' => [
                     'desktop' => [
                         'value' => [
@@ -337,6 +344,27 @@ return [
     ],
     'button' => [],
     'canvas-portal' => [],
+    'charts' => [
+        'module' => [
+            'decoration' => [
+                'layout' => [
+                    'desktop' => [
+                        'value' => [
+                            'flexDirection' => 'row'
+                        ]
+                    ]
+                ],
+                'sizing' => [
+                    'desktop' => [
+                        'value' => [
+                            'width' => '100%',
+                            'minHeight' => '300px'
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ],
     'circle-counter' => [
         'module' => [
             'decoration' => [
@@ -1351,6 +1379,214 @@ return [
             ]
         ]
     ],
+    'gravity-forms' => [
+        'module' => [
+            'decoration' => [
+                'layout' => [
+                    'desktop' => [
+                        'value' => [
+                            'flexDirection' => 'column'
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'title' => [
+            'decoration' => [
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'lineHeight' => '1em',
+                                'size' => '26px'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'description' => [
+            'decoration' => [
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'size' => '14px',
+                                'weight' => '500'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'sectionHeading' => [
+            'decoration' => [
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'lineHeight' => '1em',
+                                'size' => '22px',
+                                'weight' => '500'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'subLabel' => [
+            'decoration' => [
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'size' => '14px',
+                                'weight' => '400'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'field' => [
+            'decoration' => [
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'size' => '14px'
+                            ]
+                        ]
+                    ]
+                ],
+                'labelFont' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'size' => '14px',
+                                'weight' => '500'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'requiredMarker' => [
+            'decoration' => [
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'size' => '12px'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'button' => [
+            'decoration' => [
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'lineHeight' => '1em',
+                                'size' => '14px',
+                                'weight' => '500'
+                            ]
+                        ]
+                    ]
+                ],
+                'border' => [
+                    'desktop' => [
+                        'value' => [
+                            'radius' => [
+                                'sync' => 'on',
+                                'topLeft' => '3px',
+                                'topRight' => '3px',
+                                'bottomLeft' => '3px',
+                                'bottomRight' => '3px'
+                            ],
+                            'styles' => [
+                                'all' => [
+                                    'width' => '1px',
+                                    'style' => 'solid'
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'nextButton' => [
+            'decoration' => [
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'lineHeight' => '1em',
+                                'size' => '14px',
+                                'weight' => '500'
+                            ]
+                        ]
+                    ]
+                ],
+                'border' => [
+                    'desktop' => [
+                        'value' => [
+                            'radius' => [
+                                'sync' => 'on',
+                                'topLeft' => '3px',
+                                'topRight' => '3px',
+                                'bottomLeft' => '3px',
+                                'bottomRight' => '3px'
+                            ],
+                            'styles' => [
+                                'all' => [
+                                    'width' => '1px',
+                                    'style' => 'solid'
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'previousButton' => [
+            'decoration' => [
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'lineHeight' => '1em',
+                                'size' => '14px',
+                                'weight' => '500'
+                            ]
+                        ]
+                    ]
+                ],
+                'border' => [
+                    'desktop' => [
+                        'value' => [
+                            'radius' => [
+                                'sync' => 'on',
+                                'topLeft' => '3px',
+                                'topRight' => '3px',
+                                'bottomLeft' => '3px',
+                                'bottomRight' => '3px'
+                            ],
+                            'styles' => [
+                                'all' => [
+                                    'width' => '1px',
+                                    'style' => 'solid'
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ],
     'group' => [
         'module' => [
             'decoration' => [
@@ -1496,6 +1732,96 @@ return [
                         'value' => [
                             'objectFit' => 'fill',
                             'objectPosition' => 'center center'
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ],
+    'imagely-gallery' => [
+        'module' => [
+            'decoration' => [
+                'position' => [
+                    'desktop' => [
+                        'value' => [
+                            'mode' => 'relative',
+                            'offset' => [
+                                'horizontal' => '0px',
+                                'vertical' => '0px'
+                            ],
+                            'origin' => [
+                                'relative' => 'top left'
+                            ]
+                        ]
+                    ]
+                ],
+                'zIndex' => [
+                    'desktop' => [
+                        'value' => '9'
+                    ]
+                ]
+            ]
+        ],
+        'title' => [
+            'decoration' => [
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'size' => '18px'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'counter' => [
+            'decoration' => [
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'size' => '12px'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'slideshowLink' => [
+            'decoration' => [
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'size' => '13px'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'tagCloud' => [
+            'decoration' => [
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'lineHeight' => '1'
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'pagination' => [
+            'decoration' => [
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'lineHeight' => '1'
+                            ]
                         ]
                     ]
                 ]
@@ -1758,6 +2084,7 @@ return [
             ]
         ]
     ],
+    'payment-button' => [],
     'portfolio' => [
         'portfolioGrid' => [
             'decoration' => [
@@ -1788,6 +2115,216 @@ return [
         ]
     ],
     'post-content' => [],
+    'post-filter' => [
+        'module' => [
+            'decoration' => [
+                'layout' => [
+                    'desktop' => [
+                        'value' => [
+                            'display' => 'flex',
+                            'flexDirection' => 'row',
+                            'flexWrap' => 'wrap'
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'checkbox' => [
+            'decoration' => [
+                'layout' => [
+                    'desktop' => [
+                        'value' => [
+                            'display' => 'block'
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'radio' => [
+            'decoration' => [
+                'layout' => [
+                    'desktop' => [
+                        'value' => [
+                            'display' => 'block'
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'multipleOrderButton' => [
+            'decoration' => [
+                'background' => [
+                    'desktop' => [
+                        'value' => [
+                            'color' => ''
+                        ]
+                    ]
+                ],
+                'border' => [
+                    'desktop' => [
+                        'value' => [
+                            'styles' => [
+                                'all' => [
+                                    'width' => '0px'
+                                ]
+                            ],
+                            'radius' => [
+                                'topLeft' => '0px',
+                                'topRight' => '0px',
+                                'bottomLeft' => '0px',
+                                'bottomRight' => '0px',
+                                'sync' => 'on'
+                            ]
+                        ]
+                    ]
+                ],
+                'spacing' => [
+                    'desktop' => [
+                        'value' => [
+                            'padding' => [
+                                'top' => '0px',
+                                'right' => '0px',
+                                'bottom' => '0px',
+                                'left' => '0px',
+                                'syncHorizontal' => 'on',
+                                'syncVertical' => 'on'
+                            ]
+                        ]
+                    ]
+                ],
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'size' => '12px',
+                                'lineHeight' => '1.2',
+                                'style' => ['underline']
+                            ]
+                        ]
+                    ]
+                ],
+                'sizing' => [
+                    'desktop' => [
+                        'value' => [
+                            'width' => 'auto',
+                            'maxWidth' => 'none'
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'button' => [
+            'decoration' => [
+                'sizing' => [
+                    'desktop' => [
+                        'value' => [
+                            'width' => '100%'
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ],
+    'post-filter-item' => [
+        'module' => [
+            'decoration' => [
+                'layout' => [
+                    'desktop' => [
+                        'value' => [
+                            'columnGap' => '6px',
+                            'display' => 'grid',
+                            'rowGap' => '6px',
+                            'gridColumnCount' => '1'
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'checkbox' => [
+            'decoration' => [
+                'layout' => [
+                    'desktop' => [
+                        'value' => [
+                            'display' => 'block'
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'radio' => [
+            'decoration' => [
+                'layout' => [
+                    'desktop' => [
+                        'value' => [
+                            'display' => 'block'
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'multipleOrderButton' => [
+            'decoration' => [
+                'background' => [
+                    'desktop' => [
+                        'value' => [
+                            'color' => ''
+                        ]
+                    ]
+                ],
+                'border' => [
+                    'desktop' => [
+                        'value' => [
+                            'styles' => [
+                                'all' => [
+                                    'width' => '0px'
+                                ]
+                            ],
+                            'radius' => [
+                                'topLeft' => '0px',
+                                'topRight' => '0px',
+                                'bottomLeft' => '0px',
+                                'bottomRight' => '0px',
+                                'sync' => 'on'
+                            ]
+                        ]
+                    ]
+                ],
+                'spacing' => [
+                    'desktop' => [
+                        'value' => [
+                            'padding' => [
+                                'top' => '0px',
+                                'right' => '0px',
+                                'bottom' => '0px',
+                                'left' => '0px',
+                                'syncHorizontal' => 'on',
+                                'syncVertical' => 'on'
+                            ]
+                        ]
+                    ]
+                ],
+                'font' => [
+                    'font' => [
+                        'desktop' => [
+                            'value' => [
+                                'size' => '12px',
+                                'lineHeight' => '1.2',
+                                'style' => ['underline']
+                            ]
+                        ]
+                    ]
+                ],
+                'sizing' => [
+                    'desktop' => [
+                        'value' => [
+                            'width' => 'auto',
+                            'maxWidth' => 'none'
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ],
     'post-nav' => [
         'links' => [
             'decoration' => [

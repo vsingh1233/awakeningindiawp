@@ -45,13 +45,7 @@ function et_get_experiment_flag( string $flag = '' ) {
 
 		// Flag for enabling the AI Agent feature.
 		'aiAgent'          => [
-			'enabled'           => false,
-			'useAuthentication' => false,
-			'vars'              => [
-				'API_KEY'      => 'sk-proj-...', // The API key for the AI Agent.
-				'ENDPOINT_URL' => 'https://api.openai.com/v1', // The endpoint URL for the AI Agent. Default is 'https://api.openai.com/v1'.
-				'MODEL'        => 'gpt-5.2-codex', // The model to use for the AI Agent. Default is 'gpt-5.2-codex'.
-			],
+			'enabled' => false,
 		],
 	];
 
@@ -89,7 +83,7 @@ function et_get_experiment_flag( string $flag = '' ) {
 
 		// Flag to display debugging information for user activity tracking.
 		'userActivity'             => false,
-		
+
 		// Flag to enable the AI Agent debug features.
 		'aiAgent'                  => false,
 	];

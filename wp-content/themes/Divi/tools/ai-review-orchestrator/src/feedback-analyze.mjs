@@ -319,7 +319,7 @@ const main = async () => {
   const analysisModel =
     getArgValue("--analysis-model") ||
     process.env.OPENAI_SUMMARY_MODEL ||
-    "gpt-5.1-codex-mini";
+    "gpt-5.4-mini";
   const nanoModel =
     getArgValue("--nano-model") ||
     process.env.OPENAI_NANO_MODEL ||

@@ -44,7 +44,16 @@ class Conditions {
 			}
 		}
 
-		return et_core_is_fb_enabled();
+		$is_vb_enabled = et_core_is_fb_enabled();
+
+		/**
+		 * Filter whether Visual Builder is considered enabled for the current request.
+		 *
+		 * @since ??
+		 *
+		 * @param bool $is_vb_enabled Whether Visual Builder is enabled.
+		 */
+		return apply_filters( 'divi_framework_conditions_is_vb_enabled', $is_vb_enabled );
 	}
 
 	/**
@@ -159,7 +168,19 @@ class Conditions {
 	 * @return bool
 	 */
 	public static function is_d5_enabled() {
-		return et_builder_d5_enabled();
+		$is_d5_enabled = et_builder_d5_enabled();
+
+		/**
+		 * Filter whether Divi 5 is considered enabled for the current request.
+		 *
+		 * Mirrors `divi_framework_conditions_is_vb_enabled` so callers (and tests)
+		 * can override the memoized `et_builder_d5_enabled()` result in-process.
+		 *
+		 * @since ??
+		 *
+		 * @param bool $is_d5_enabled Whether Divi 5 is enabled.
+		 */
+		return apply_filters( 'divi_framework_conditions_is_d5_enabled', $is_d5_enabled );
 	}
 
 	// TODO feat(D5, Shortcode) Move this trait into single Shortcode class under Framework https://github.com/elegantthemes/Divi/issues/31411.

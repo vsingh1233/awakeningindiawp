@@ -90,6 +90,9 @@ class ModuleOptionsPresetAttrs {
 				return TextShadowPresetAttrsMap::get_map( $attr_name );
 			case 'divi/font':
 				return FontPresetAttrsMap::get_map( $attr_name, $args );
+			case 'divi/font-chart-js':
+				// The Chart.js font group shares the same attribute shape as `divi/font`.
+				return FontPresetAttrsMap::get_map( $attr_name, $args );
 			case 'divi/font-body':
 				return FontBodyPresetAttrsMap::get_map( $attr_name );
 			case 'divi/font-header':

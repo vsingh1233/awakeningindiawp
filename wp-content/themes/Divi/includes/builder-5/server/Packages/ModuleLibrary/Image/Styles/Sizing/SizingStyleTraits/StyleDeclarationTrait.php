@@ -17,7 +17,6 @@ use ET\Builder\Packages\ModuleUtils\ModuleUtils;
 use ET\Builder\Packages\StyleLibrary\Utils\StyleDeclarations;
 
 trait StyleDeclarationTrait {
-
 	/**
 	 * Get width and alignment CSS declaration from Sizing style and based on given attrValue.
 	 *
@@ -276,20 +275,25 @@ trait StyleDeclarationTrait {
 			]
 		);
 
-		if ( null !== $min_height ) {
+		if ( null !== $min_height && '' !== $min_height ) {
 			$style_declarations->add( 'min-height', $min_height );
 		}
 
 		if ( null !== $height ) {
-			$style_declarations->add( 'height', $height );
+			// `auto` is the Image module's default for height (see svg_style_declaration()).
+			// In D4, an empty responsive value means "reset to this default on this breakpoint."
+			// Without this, a converted D4 desktop height (e.g. 444px) cascades to smaller viewports.
+			$height_default  = 'auto';
+			$resolved_height = '' === $height ? $height_default : $height;
+			$style_declarations->add( 'height', $resolved_height );
 
-			// Set width to auto if forceFullwidth is not enabled and maxHeight is not auto.
-			if ( 'on' !== $force_fullwidth && 'auto' !== $height ) {
+			// Set width to auto if forceFullwidth is not enabled and height is not the default.
+			if ( 'on' !== $force_fullwidth && $height_default !== $resolved_height ) {
 				$style_declarations->add( 'width', 'auto' );
 			}
 		}
 
-		if ( null !== $max_height ) {
+		if ( null !== $max_height && '' !== $max_height ) {
 			$style_declarations->add( 'max-height', $max_height );
 
 			// Set width to auto if forceFullwidth is not enabled and maxHeight is not none.

@@ -81,6 +81,44 @@ class DynamicAssetsDetection {
 	private ?bool $_is_theme_builder_context = null;
 
 	/**
+	 * Seen late-replay block attribute payload hashes for this request.
+	 *
+	 * @var array<string, bool>
+	 */
+	private array $_seen_block_attribute_payloads = [];
+
+	/**
+	 * Seen late-replay block content payload hashes for this request.
+	 *
+	 * @var array<string, bool>
+	 */
+	private array $_seen_late_block_payloads = [];
+
+	/**
+	 * Seen late-replay shortcode attribute payload hashes for this request.
+	 *
+	 * @var array<string, bool>
+	 */
+	private array $_seen_shortcode_attribute_payloads = [];
+
+	/**
+	 * Seen late-replay shortcode content payload hashes for this request.
+	 *
+	 * @var array<string, bool>
+	 */
+	private array $_seen_late_shortcode_payloads = [];
+
+	/**
+	 * Cached preset feature results for this detection request.
+	 *
+	 * This stays instance-scoped so tests and later requests cannot reuse stale
+	 * preset results computed against a different GlobalPreset state.
+	 *
+	 * @var array<string, array>
+	 */
+	private array $_preset_feature_used_cache = [];
+
+	/**
 	 * Constructor.
 	 *
 	 * @since ??
@@ -232,6 +270,33 @@ class DynamicAssetsDetection {
 	 */
 	private function _get_theme_builder_template_content(): string {
 		return call_user_func( $this->_get_theme_builder_content_callback );
+	}
+
+	/**
+	 * Append a late-replay payload once per unique value for this request.
+	 *
+	 * @since ??
+	 *
+	 * @param string $payload            Payload to append.
+	 * @param string $target_property    Detection state string property name.
+	 * @param string $seen_hashes_bucket Runtime bucket property name.
+	 *
+	 * @return void
+	 */
+	private function _append_unique_detection_payload( string $payload, string $target_property, string $seen_hashes_bucket ): void {
+		if ( '' === $payload ) {
+			return;
+		}
+
+		$payload_hash = md5( $payload );
+
+		if ( isset( $this->{$seen_hashes_bucket}[ $payload_hash ] ) ) {
+			return;
+		}
+
+		// Mutate the bucket in place to avoid PHP copy-on-write duplication on each unique append.
+		$this->{$seen_hashes_bucket}[ $payload_hash ] = true;
+		$this->detection_state->{$target_property}   .= $payload;
 	}
 
 	/**
@@ -923,20 +988,18 @@ class DynamicAssetsDetection {
 	 * @return array Preset features detected.
 	 */
 	public function presets_feature_used( string $content ): array {
-		static $cached = [];
-
 		// Create a unique key for/using the given arguments.
 		$key = md5( $content );
 
 		// Return cached value if available.
-		if ( isset( $cached[ $key ] ) ) {
-			return $cached[ $key ];
+		if ( isset( $this->_preset_feature_used_cache[ $key ] ) ) {
+			return $this->_preset_feature_used_cache[ $key ];
 		}
 
 		// If early_attributes was loaded from postmeta cache, preset features were already processed.
 		if ( $this->_should_skip_detection() ) {
-			$cached[ $key ] = [];
-			return $cached[ $key ];
+			$this->_preset_feature_used_cache[ $key ] = [];
+			return $this->_preset_feature_used_cache[ $key ];
 		}
 
 		$preset_content = '';
@@ -983,9 +1046,9 @@ class DynamicAssetsDetection {
 		}
 
 		// Cache the results.
-		$cached[ $key ] = $this->detect_preset_feature_use( $preset_content );
+		$this->_preset_feature_used_cache[ $key ] = $this->detect_preset_feature_use( $preset_content );
 
-		return $cached[ $key ];
+		return $this->_preset_feature_used_cache[ $key ];
 	}
 
 	/**
@@ -1117,6 +1180,10 @@ class DynamicAssetsDetection {
 	 * @return mixed
 	 */
 	public function log_block_used( $parsed_block ) {
+		if ( ! DynamicAssetsUtils::should_generate_dynamic_assets() || ! DynamicAssetsUtils::should_run_detection() ) {
+			return $parsed_block;
+		}
+
 		// If no `parentId` is found, this block isn't Divi 5 module thus it can be skipped.
 		if ( empty( $parsed_block['parentId'] ) ) {
 			return $parsed_block;
@@ -1154,14 +1221,17 @@ class DynamicAssetsDetection {
 				// We only want to capture genuinely new content (widgets, plugins, etc.).
 				if ( ! $is_from_theme_builder ) {
 					// Store serialized block content for late preset detection.
-					$block_inner_content                        = '';
-					$serialized_block                           = get_comment_delimited_block_content( $block_name, $block_attrs, $block_inner_content );
-					$this->detection_state->late_block_content .= $serialized_block;
+					$block_inner_content = '';
+					$serialized_block    = get_comment_delimited_block_content( $block_name, $block_attrs, $block_inner_content );
+					$this->_append_unique_detection_payload( $serialized_block, 'late_block_content', '_seen_late_block_payloads' );
+
+					// Accumulate late block attributes for late feature detection.
+					$encoded_block_attrs = wp_json_encode( $block_attrs );
+					if ( false !== $encoded_block_attrs ) {
+						$this->_append_unique_detection_payload( $encoded_block_attrs, 'attribute_used', '_seen_block_attribute_payloads' );
+					}
 				}
 			}
-
-			// Accumulate block attributes for late feature detection.
-			$this->detection_state->attribute_used = $this->detection_state->attribute_used . wp_json_encode( $block_attrs );
 		}
 
 		return $parsed_block;
@@ -1181,6 +1251,10 @@ class DynamicAssetsDetection {
 	 * @return mixed
 	 */
 	public function log_shortcode_used( $override, string $tag, array $attrs, array $m ) {
+		if ( ! DynamicAssetsUtils::should_generate_dynamic_assets() || ! DynamicAssetsUtils::should_run_detection() ) {
+			return $override;
+		}
+
 		if ( in_array( $tag, $this->detection_state->verified_shortcodes, true ) ) {
 			// Log the shortcode tags used.
 			if ( ! in_array( $tag, $this->detection_state->shortcode_used, true ) ) {
@@ -1190,11 +1264,6 @@ class DynamicAssetsDetection {
 
 			// Check for shortcode attribute that we're interested in.
 			$found_interested_attribute = array_intersect( array_keys( $attrs ), $this->detection_state->interested_attrs );
-
-			if ( $found_interested_attribute ) {
-				// Set `$m[0]` for late detection, which is the shortcode string.
-				$this->detection_state->attribute_used = $this->detection_state->attribute_used . $m[0];
-			}
 
 			// Track shortcode content for late detection comparison (similar to blocks).
 			if ( $this->detection_state->early_detection_complete ) {
@@ -1207,8 +1276,13 @@ class DynamicAssetsDetection {
 				// Theme Builder shortcodes are already detected during early detection.
 				// We only want to capture genuinely new content (widgets, plugins, etc.).
 				if ( ! $is_from_theme_builder && isset( $m[0] ) ) {
+					if ( $found_interested_attribute ) {
+						// Set `$m[0]` for late detection, which is the shortcode string.
+						$this->_append_unique_detection_payload( $m[0], 'attribute_used', '_seen_shortcode_attribute_payloads' );
+					}
+
 					// Store shortcode string for late preset detection.
-					$this->detection_state->late_shortcode_content .= $m[0];
+					$this->_append_unique_detection_payload( $m[0], 'late_shortcode_content', '_seen_late_shortcode_payloads' );
 				}
 			}
 		}

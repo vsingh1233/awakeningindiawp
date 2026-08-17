@@ -142,8 +142,7 @@ export const buildReviewerSummaryContext = (
       const size = (file.additions ?? 0) + (file.deletions ?? 0);
       const summary = file.summary || "(no summary)";
       return `- ${file.path} (${size} lines): ${summary}`;
-    })
-    .slice(0, 12);
+    });
   return [
     "Summaries (use these before re-diffing):",
     summaries.overall?.summary
@@ -188,6 +187,49 @@ export const buildReviewerMergePrompt = ({
   outputs.map((output, index) => `--- Output ${index + 1} ---\n${output}`).join("\n\n"),
 ].join("\n");
 
+const buildRoundGuidance = (retroReview) => {
+  const round = Number(retroReview?.review_round || 1);
+  if (round < 2) {
+    return [
+      "Review round: 1 (first pass).",
+      "This is the only chance to raise issues that already exist in this diff.",
+      "Later rounds review only the delta since this review. Do not save findings for later.",
+      "Inspect the actual diffs of every focused file before returning. Summaries are a map, not a substitute.",
+      "After your first pass, do a second pass over remaining focused files for independent issues you skipped.",
+      "If several findings have similar severity (for example multiple coverage gaps), report all of them now.",
+      "Empty findings is allowed when the change is genuinely solid.",
+    ].join("\n");
+  }
+  const sameSha = true === retroReview?.same_sha_as_last_review;
+  const deltaHasTests = true === retroReview?.delta_has_tests;
+  const lines = [
+    `Review round: ${round} (follow-up).`,
+    "Empty findings is the successful outcome when prior feedback was addressed and the delta introduces no new defects.",
+    "You are not being helpful by finding more. You are being helpful by confirming the PR is ready, or by catching a real regression in the new delta.",
+    "Only raise a new finding if all of these are true:",
+    "- it is in diff_since_last_run (or an unresolved prior thread still missing a fix), AND",
+    "- it could not have been raised in a prior round on the then-existing diff, AND",
+    "- it is merge-blocking (correctness, security, data loss, or a test that would not fail if the new delta were reverted).",
+    "Do not hunt for additional tests, stricter assertions, spec maps, or sibling-file parity on code that existed in prior rounds.",
+    "Do not re-raise prior feedback unless diff_since_last_run shows the fix is missing or incomplete (the retro-feedback reviewer owns that).",
+  ];
+  if (true === sameSha) {
+    lines.push(
+      "No new commits since the last DeepHive review. Return zero new findings unless verifying an unresolved prior thread."
+    );
+  }
+  if (true === deltaHasTests) {
+    lines.push(
+      "Tests were added or updated in this delta. Treat that as sufficient unless the new tests are broken or would still pass if the new behavior were reverted."
+    );
+  } else {
+    lines.push(
+      "If the author added tests or specs in response to prior feedback, treat that as sufficient unless the new tests are broken or vacuous."
+    );
+  }
+  return lines.join("\n");
+};
+
 export const reviewerPrompt = ({
   reviewer,
   changedFiles,
@@ -215,11 +257,14 @@ export const reviewerPrompt = ({
   "You are read-only: do not modify files or apply patches.",
   "Do not re-raise prior feedback unless diff_since_last_run shows new evidence or context.",
   "Prior feedback is provided in the 'Prior review feedback' section as facts.retroReview JSON,",
-  "including threads, recent_comments, and diff_since_last_run.",
+  "including review_round, threads, recent_comments, prior_findings, delta_paths, and diff_since_last_run.",
   "",
   `Reviewer: ${reviewer.name}`,
   "",
   reviewer.body,
+  "",
+  "Round rules:",
+  buildRoundGuidance(retroReview),
   "",
   "Context:",
   `Repo root: ${repoRoot}`,
@@ -228,6 +273,7 @@ export const reviewerPrompt = ({
   headRef ? `Head ref: ${headRef}` : "Head ref: (none)",
   prNumber ? `PR number: ${prNumber}` : "PR number: (none)",
   repoSlug ? `Repo slug: ${repoSlug}` : "Repo slug: (none)",
+  `Review round: ${Number(retroReview?.review_round || 1)}`,
   "",
   "Related PRs:",
   formatRelatedPrs(relatedPrs),
@@ -251,8 +297,9 @@ export const reviewerPrompt = ({
   "",
   buildReviewerSummaryContext(summaries, outputPaths, focusedFiles),
   "",
-  "Use the summaries to guide your review and pique your interest. Only inspect diffs on-demand for files you choose after reviewing the summaries and finding something of interest.",
-  "Make sure you review and base your comments on the diffs, not the summaries.",
+  Number(retroReview?.review_round || 1) >= 2
+    ? "On this follow-up round, inspect diffs for focused files and diff_since_last_run only. Do not go looking through the rest of the original PR for new nits."
+    : "Use summaries as a map, then inspect the actual diffs of every focused file. Base comments on the diffs, not the summaries.",
   "",
   "Companion dependency classification guidance:",
   "- If Companion PR context status=confirmed and the concern is only dependency/merge-order coordination with a same-issue/same-branch companion PR, classify it as non-blocking.",

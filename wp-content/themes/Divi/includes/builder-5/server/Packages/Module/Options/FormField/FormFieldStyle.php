@@ -51,6 +51,7 @@ class FormFieldStyle {
 	 *     @type bool          $isInsideStickyModule     Optional. Whether the module is inside a sticky module or not. Default `false`.
 	 *     @type string|null   $stickyParentOrderClass   Optional. The sticky parent order class name. Default `null`.
 	 *     @type bool          $disableLabelStyle        Optional. Whether to disable label style output. Default `false`.
+	 *     @type array         $layout                   Optional. Layout style props passed to the primary ElementStyle call. Default `[]`.
 	 *     @type string        $returnType               Optional. This is the type of value that the function will return.
 	 *                                                   Can be either `string` or `array`. Default `array`.
 	 * }
@@ -108,6 +109,7 @@ class FormFieldStyle {
 		$children                     = $return_as_array ? [] : '';
 		$has_explicit_label_selectors = ! empty( $property_selectors['label']['font'] ?? [] );
 		$disable_label_style          = $args['disableLabelStyle'];
+		$layout                       = $args['layout'] ?? [];
 		$focus_placeholder_font_attr  = self::_get_focus_font_attr_from_decoration_font( $attr['decoration']['font'] ?? [] );
 		$placeholder_font_attr        = $attr['decoration']['placeholderFont'] ?? [];
 
@@ -154,6 +156,7 @@ class FormFieldStyle {
 					'propertySelectors' => $property_selectors['spacing'] ?? [],
 					'important'         => is_bool( $important ) ? $important : ( $important['spacing'] ?? false ),
 				],
+				'layout'                 => $layout,
 			]
 		);
 

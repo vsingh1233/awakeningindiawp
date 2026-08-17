@@ -61,9 +61,10 @@ class BlogController extends RESTController {
 			'manual_excerpt'   => $request->get_param( 'manualExcerpt' ),
 			'offset'           => $request->get_param( 'offset' ),
 			'orderby'          => $request->get_param( 'orderby' ),
-			'is_theme_builder' => $request->get_param( 'isThemeBuilder' ) ?? false,
-			'use_current_loop' => $request->get_param( 'useCurrentLoop' ) ?? 'off',
-			'archive_term_id'  => absint( $request->get_param( 'archiveTermId' ) ?? 0 ),
+			'is_theme_builder'  => $request->get_param( 'isThemeBuilder' ) ?? false,
+			'use_current_loop'  => $request->get_param( 'useCurrentLoop' ) ?? 'off',
+			'archive_term_id'   => absint( $request->get_param( 'archiveTermId' ) ?? 0 ),
+			'archive_post_type' => sanitize_key( (string) ( $request->get_param( 'archivePostType' ) ?? '' ) ),
 		];
 
 		$query_args = [
@@ -102,10 +103,18 @@ class BlogController extends RESTController {
 		// Apply category filtering using the consolidated utility method.
 		$query_args = ModuleUtils::add_category_query_args( $query_args, $args['categories'], $args['post_type'], $vb_current_post_id );
 
-		// Apply archive context for "Posts For Current Page" only on taxonomy archive-style VB contexts.
+		// Apply archive context for "Posts For Current Page".
 		// Singular pages may still expose a stale `mainLoopSettingsData.termId` in the settings store; gating on
 		// `mainLoopType` avoids restricting the query to that term on normal pages (#48758 follow-up).
-		$main_loop_type                    = sanitize_key( (string) ( $request->get_param( 'mainLoopType' ) ?? 'singular' ) );
+		$main_loop_type = sanitize_key( (string) ( $request->get_param( 'mainLoopType' ) ?? 'singular' ) );
+
+		// CPT post-type archive: override post_type from archive context (LoopUtils parity; #51239).
+		if ( 'on' === $args['use_current_loop'] && 'post_type_archive' === $main_loop_type && '' !== $args['archive_post_type'] ) {
+			$query_args['post_type'] = $args['archive_post_type'];
+			$args['post_type']       = $args['archive_post_type'];
+		}
+
+		// Taxonomy archive-style VB contexts: apply term filter (+ CPT post_type from taxonomy object_type).
 		$should_apply_archive_term_context = in_array( $main_loop_type, [ 'category', 'tag', 'taxonomy' ], true );
 
 		if ( 'on' === $args['use_current_loop'] && $should_apply_archive_term_context && $args['archive_term_id'] > 0 && empty( $query_args['cat'] ) && empty( $query_args['tax_query'] ) ) {
@@ -122,6 +131,22 @@ class BlogController extends RESTController {
 							'terms'    => $term->term_id,
 						],
 					];
+
+					// Custom taxonomies: set post_type from taxonomy object_type (LoopUtils parity; #51239).
+					// Core category/post_tag stay on their shortcuts without forcing CPT post types.
+					if ( 'post_tag' !== $term->taxonomy ) {
+						$tax_object = get_taxonomy( $term->taxonomy );
+
+						if ( $tax_object && ! empty( $tax_object->object_type ) ) {
+							// WP_Query accepts the full object_type array (multi-type taxonomies).
+							$query_args['post_type'] = $tax_object->object_type;
+
+							// Blog sticky/category helpers require a string post type, not object_type's array.
+							$args['post_type'] = is_array( $tax_object->object_type )
+								? (string) reset( $tax_object->object_type )
+								: (string) $tax_object->object_type;
+						}
+					}
 				}
 			}
 		}
@@ -425,6 +450,16 @@ class BlogController extends RESTController {
 					return sanitize_key( (string) $value );
 				},
 			],
+			'archivePostType' => [
+				'type'              => 'string',
+				'default'           => '',
+				'validate_callback' => function ( $param ) {
+					return is_string( $param );
+				},
+				'sanitize_callback' => function ( $value ) {
+					return sanitize_key( (string) $value );
+				},
+			],
 		];
 	}
 	/**
@@ -626,9 +661,36 @@ class BlogController extends RESTController {
 			Style::set_detected_module_types_for_inner_content( [] );
 		}
 
-		ob_start();
-		et_pb_gallery_images( 'slider' );
-		$post_gallery = ob_get_clean();
+		$post_format = et_pb_post_format();
+
+		// Only compute post-format helpers for matching formats (FE parity via et_divi_post_format_content).
+		$first_video   = false;
+		$post_gallery  = '';
+		$audio_player  = false;
+		$quote_content = false;
+		$link_url      = '';
+
+		if ( 'video' === $post_format ) {
+			$first_video = PostUtility::get_first_video();
+		}
+
+		if ( 'gallery' === $post_format ) {
+			ob_start();
+			et_pb_gallery_images( 'slider' );
+			$post_gallery = ob_get_clean();
+		}
+
+		if ( 'audio' === $post_format ) {
+			$audio_player = et_pb_get_audio_player();
+		}
+
+		if ( 'quote' === $post_format ) {
+			$quote_content = et_get_blockquote_in_content();
+		}
+
+		if ( 'link' === $post_format ) {
+			$link_url = et_get_link_url();
+		}
 
 		// Post background color.
 		$post_use_background_color = get_post_meta( $post->ID, '_et_post_use_bg_color', true ) ? true : false;
@@ -659,12 +721,12 @@ class BlogController extends RESTController {
 			],
 			'categories'         => $categories,
 			'postFormat'         => [
-				'type'            => et_pb_post_format(),
-				'video'           => PostUtility::get_first_video(),
+				'type'            => $post_format,
+				'video'           => $first_video,
 				'gallery'         => $post_gallery,
-				'audio'           => et_core_intentionally_unescaped( et_pb_get_audio_player(), 'html' ),
-				'quote'           => et_core_intentionally_unescaped( et_get_blockquote_in_content(), 'html' ),
-				'link'            => esc_html( et_get_link_url() ),
+				'audio'           => et_core_intentionally_unescaped( $audio_player, 'html' ),
+				'quote'           => et_core_intentionally_unescaped( $quote_content, 'html' ),
+				'link'            => esc_html( $link_url ),
 				'textColorClass'  => et_divi_get_post_text_color(),
 				'backgroundColor' => $post_use_background_color ? $post_background_color : '',
 			],

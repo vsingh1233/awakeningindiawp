@@ -15,7 +15,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 use ET\Builder\Framework\DependencyManagement\Interfaces\DependencyInterface;
 use ET\Builder\Framework\Utility\Conditions;
 use ET\Builder\Framework\Utility\HTMLUtility;
-use ET\Builder\Framework\Utility\SanitizerUtility;
+use ET\Builder\Framework\Utility\URLUtility;
 use ET\Builder\FrontEnd\BlockParser\BlockParserStore;
 use ET\Builder\FrontEnd\Module\Style;
 use ET\Builder\Packages\Module\Layout\Components\ModuleElements\ModuleElements;
@@ -431,60 +431,6 @@ class PostNavigationModule implements DependencyInterface {
 	}
 
 	/**
-	 * Canonical absolute URL for the current frontend HTTP request.
-	 *
-	 * `REQUEST_URI` is rooted at the web server and repeats the WordPress home path on
-	 * subdirectory installs; passing it to `home_url()` duplicates that segment. This builds
-	 * `home_url`-relative path and query instead.
-	 *
-	 * @since ??
-	 *
-	 * @return string Absolute URL for the active request.
-	 */
-	private static function _get_canonical_current_request_url(): string {
-		$request_uri = esc_url_raw( wp_unslash( $_SERVER['REQUEST_URI'] ?? '' ) );
-
-		if ( '' === $request_uri ) {
-			return home_url( '/' );
-		}
-
-		$parsed = wp_parse_url( $request_uri );
-		$path   = isset( $parsed['path'] ) ? $parsed['path'] : '/';
-		$query  = isset( $parsed['query'] ) ? $parsed['query'] : '';
-
-		$home_path = wp_parse_url( home_url( '/' ), PHP_URL_PATH );
-
-		if ( is_string( $home_path ) && '' !== $home_path && '/' !== $home_path ) {
-			$normalized_base = untrailingslashit( $home_path );
-
-			if ( str_starts_with( $path, $normalized_base . '/' ) ) {
-				$path = substr( $path, strlen( $normalized_base ) );
-			} elseif ( $normalized_base === $path || $normalized_base . '/' === $path ) {
-				$path = '/';
-			}
-
-			if ( '' === $path ) {
-				$path = '/';
-			}
-		}
-
-		if ( '/' === $path || '' === $path ) {
-			$url = home_url( '/' );
-		} else {
-			$url = home_url( '/' . ltrim( $path, '/' ) );
-		}
-
-		if ( '' !== $query ) {
-			parse_str( $query, $query_params );
-			if ( ! empty( $query_params ) ) {
-				$url = add_query_arg( $query_params, $url );
-			}
-		}
-
-		return $url;
-	}
-
-	/**
 	 * Get the Post Navigation data.
 	 *
 	 * @since ??
@@ -729,7 +675,7 @@ class PostNavigationModule implements DependencyInterface {
 		$prev_page    = max( 1, $current_page - 1 );
 
 		// Get the current URL for building pagination URLs.
-		$current_url = self::_get_canonical_current_request_url();
+		$current_url = URLUtility::get_canonical_current_request_url();
 
 		// Show next button only if current page is less than total pages.
 		if ( $current_page < $total_pages ) {
@@ -770,7 +716,7 @@ class PostNavigationModule implements DependencyInterface {
 						'paged',
 						'page',
 					],
-					self::_get_canonical_current_request_url()
+					URLUtility::get_canonical_current_request_url()
 				);
 
 				// Add filter to intercept WP Page Navi's URL generation at the source.
@@ -799,7 +745,7 @@ class PostNavigationModule implements DependencyInterface {
 							'/href="([^"]*\/page\/(\d+)\/[^"]*)"/',
 							function ( $matches ) use ( $loop_page_param ) {
 								$page_number = $matches[2];
-								$current_url = self::_get_canonical_current_request_url();
+								$current_url = URLUtility::get_canonical_current_request_url();
 								$loop_url    = add_query_arg(
 									$loop_page_param,
 									$page_number,
@@ -1119,6 +1065,12 @@ class PostNavigationModule implements DependencyInterface {
 			];
 		}
 
+		$html_attrs = [];
+
+		if ( 'main_query' !== $target_loop && is_string( $target_loop ) && '' !== $target_loop ) {
+			$html_attrs['data-target-loop'] = esc_attr( $target_loop );
+		}
+
 		return Module::render(
 			[
 				// FE only.
@@ -1135,6 +1087,7 @@ class PostNavigationModule implements DependencyInterface {
 				'classnamesFunction'       => [ self::class, 'module_classnames' ],
 				'stylesComponent'          => [ self::class, 'module_styles' ],
 				'scriptDataComponent'      => [ self::class, 'module_script_data' ],
+				'htmlAttrs'                => $html_attrs,
 				'parentAttrs'              => [],
 				'parentId'                 => '',
 				'parentName'               => '',

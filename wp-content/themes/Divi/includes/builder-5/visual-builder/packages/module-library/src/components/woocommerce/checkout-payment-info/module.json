@@ -249,6 +249,7 @@
       },
       "styleProps": {
         "selector": "body #page-container {{selector}} #payment #place_order",
+        "customPostTypeSelector": "body.et-db #page-container #et-boc .et-l {{baseSelector}} #payment #place_order",
         "border": {
           "selector": "{{selector}} #payment #place_order",
           "important": {

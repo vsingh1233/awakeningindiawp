@@ -1649,7 +1649,7 @@ class OffCanvasHooks {
 	 * @return string The unmodified content.
 	 */
 	public static function reset_order_index_before_rendering( $content ) {
-		// Initialize global canvas tracking at the start of a new page render.
+		// Initialize page-wide off-canvas tracking once per HTTP request.
 		OrderIndexResetManager::init_page_render();
 
 		// Clear caches when starting a new rendering context (header/post content/footer).
@@ -1711,10 +1711,8 @@ class OffCanvasHooks {
 			return $content;
 		}
 
-		// Skip canvas processing during the_content when in Theme Builder layout context.
-		// This prevents post ID confusion when Post Content module renders content within TB layouts,
-		// but allows canvas processing for regular posts rendered via the_content.
-		if ( doing_filter( 'the_content' ) && self::_get_theme_builder_layout_post_id( $current_post_id ) !== null ) {
+		// Skip canvas processing during the_content only for Post Content inside TB body layouts.
+		if ( self::_should_skip_off_canvas_during_the_content( $current_post_id ) ) {
 			return $content;
 		}
 
@@ -1725,8 +1723,7 @@ class OffCanvasHooks {
 		}
 
 		// In Theme Builder layouts, always use the layout post ID for canvas processing.
-		$layout_post_id = self::_get_theme_builder_layout_post_id( $current_post_id );
-		$canvas_post_id = null !== $layout_post_id ? $layout_post_id : $current_post_id;
+		$canvas_post_id = self::_get_canvas_processing_post_id( $current_post_id );
 
 		// Process canvases that should be appended above main content.
 		// The flag is set inside _process_appended_canvases before rendering
@@ -1764,10 +1761,8 @@ class OffCanvasHooks {
 			return $content;
 		}
 
-		// Skip canvas processing during the_content when in Theme Builder layout context.
-		// This prevents post ID confusion when Post Content module renders content within TB layouts,
-		// but allows canvas processing for regular posts rendered via the_content.
-		if ( doing_filter( 'the_content' ) && self::_get_theme_builder_layout_post_id( $current_post_id ) !== null ) {
+		// Skip canvas processing during the_content only for Post Content inside TB body layouts.
+		if ( self::_should_skip_off_canvas_during_the_content( $current_post_id ) ) {
 			return $content;
 		}
 
@@ -1779,28 +1774,26 @@ class OffCanvasHooks {
 
 		// In Theme Builder layouts, always use the layout post ID for canvas processing.
 		// This ensures interactions defined in layouts use the correct canvas storage location.
-		$layout_post_id = self::_get_theme_builder_layout_post_id( $current_post_id );
-		$canvas_post_id = null !== $layout_post_id ? $layout_post_id : $current_post_id;
+		$canvas_post_id = self::_get_canvas_processing_post_id( $current_post_id );
 
 		// Process target IDs for the canvas post (layout post in TB context).
 		// This ensures canvases are processed using the correct post ID where they're stored.
 		$target_ids = self::_get_per_post_global_value( 'divi_off_canvas_target_ids', $canvas_post_id, [] );
 
+		// Process canvases that should be appended below main content before interaction targets.
+		// Append is the canonical render path for global canvases with appendToMainCanvas (#50537).
+		if ( $canvas_post_id ) {
+			self::_process_appended_canvases( $canvas_post_id, 'below' );
+		}
+
 		// Process off-canvas content for interaction targets.
 		if ( ! empty( $target_ids ) ) {
-			// Process off-canvas content for these targets.
 			// This runs after all main content blocks have been rendered (orderIndex assigned),
 			// so canvas content continues the orderIndex sequence sequentially.
 			self::_process_off_canvas_content_for_targets( $target_ids, $canvas_post_id );
 
 			// Clean up target IDs for the canvas post.
 			unset( $GLOBALS['divi_off_canvas_target_ids'][ $canvas_post_id ] );
-		}
-
-		// Process canvases that should be appended below main content.
-		// Use the same canvas post ID for consistency.
-		if ( $canvas_post_id ) {
-			self::_process_appended_canvases( $canvas_post_id, 'below' );
 		}
 
 		// Return content unchanged (rendering happens as side effect).
@@ -1847,6 +1840,15 @@ class OffCanvasHooks {
 	 * @return int|false Post ID or false if not available.
 	 */
 	private static function _get_current_post_id() {
+		// Native main-post the_content must win over cached TB layout IDs from prior header/footer passes.
+		if ( doing_filter( 'the_content' ) ) {
+			$the_id = self::_get_the_content_post_id();
+			if ( self::_is_native_content_post_id( $the_id ) ) {
+				self::$_current_post_id_cache = $the_id;
+				return self::$_current_post_id_cache;
+			}
+		}
+
 		// Return cached value if available.
 		if ( null !== self::$_current_post_id_cache ) {
 			return self::$_current_post_id_cache;
@@ -1965,7 +1967,20 @@ class OffCanvasHooks {
 				}
 
 				$is_global = $canvas_meta_data['isGlobal'] ?? false;
-				if ( ! $is_global ) {
+				if ( $is_global ) {
+					$append_to_main = $canvas_meta_data['appendToMainCanvas'] ?? null;
+
+					// Global canvases with append positioning are rendered via the append path.
+					// Interaction pre-render must not claim them and block append (#50537).
+					if ( 'above' === $append_to_main || 'below' === $append_to_main ) {
+						continue;
+					}
+
+					// Skip global canvases already rendered via append or a prior interaction (#50537).
+					if ( self::_is_global_canvas_already_rendered_for_page( $canvas_id ) ) {
+						continue;
+					}
+				} else {
 					$canonical_local_canvas_id = self::_normalize_slot_prefixed_canvas_id( (string) $canvas_id );
 					if ( '' === $canonical_local_canvas_id ) {
 						continue;
@@ -2001,9 +2016,244 @@ class OffCanvasHooks {
 		// Process each canvas through Divi's rendering pipeline.
 		foreach ( $canvases_to_process as $canvas_info ) {
 			$canvas_id = $canvas_info['canvas_id'];
+			$is_global = $canvas_info['is_global'] ?? false;
 
 			self::_render_off_canvas_content_with_css( $canvas_id, $post_id );
+
+			// Mark interaction-only global canvases so other TB areas do not duplicate (#50537).
+			if ( $is_global ) {
+				if ( ! isset( $GLOBALS['divi_off_canvas_global_rendered'] ) ) {
+					$GLOBALS['divi_off_canvas_global_rendered'] = [];
+				}
+
+				$canonical_canvas_id = self::_get_canonical_global_canvas_id( $canvas_id );
+				$GLOBALS['divi_off_canvas_global_rendered'][ $canonical_canvas_id ] = self::_get_rendering_context();
+			}
 		}
+	}
+
+	/**
+	 * Normalize a global canvas ID for cross-context deduplication.
+	 *
+	 * @since ??
+	 *
+	 * @param string $canvas_id Raw canvas ID.
+	 *
+	 * @return string Canonical global canvas ID.
+	 */
+	private static function _get_canonical_global_canvas_id( string $canvas_id ): string {
+		$canonical_canvas_id = self::_normalize_slot_prefixed_canvas_id( $canvas_id );
+
+		return '' !== $canonical_canvas_id ? $canonical_canvas_id : $canvas_id;
+	}
+
+	/**
+	 * Check whether a global canvas has already been rendered on this page request.
+	 *
+	 * @since ??
+	 *
+	 * @param string $canvas_id Canvas ID.
+	 *
+	 * @return bool
+	 */
+	private static function _is_global_canvas_already_rendered_for_page( string $canvas_id ): bool {
+		$canonical_canvas_id = self::_get_canonical_global_canvas_id( $canvas_id );
+		$candidate_ids       = array_unique( [ $canvas_id, $canonical_canvas_id ] );
+
+		if ( ! empty( $GLOBALS['divi_off_canvas_global_rendered'] ) && is_array( $GLOBALS['divi_off_canvas_global_rendered'] ) ) {
+			foreach ( $candidate_ids as $candidate_id ) {
+				if ( isset( $GLOBALS['divi_off_canvas_global_rendered'][ $candidate_id ] ) ) {
+					return true;
+				}
+			}
+		}
+
+		if ( empty( $GLOBALS['divi_off_canvas_rendered'] ) || ! is_array( $GLOBALS['divi_off_canvas_rendered'] ) ) {
+			return false;
+		}
+
+		foreach ( $GLOBALS['divi_off_canvas_rendered'] as $post_rendered ) {
+			if ( ! is_array( $post_rendered ) ) {
+				continue;
+			}
+
+			foreach ( $candidate_ids as $candidate_id ) {
+				if ( isset( $post_rendered[ $candidate_id ] ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Register a canvas injection for this page request.
+	 *
+	 * @since ??
+	 *
+	 * @param string      $canvas_id       Canvas ID.
+	 * @param bool|null   $is_global       Whether the canvas is global. Null assumes global for legacy paths.
+	 * @param int         $owner_post_id   Post/layout ID whose rendered bucket is being injected.
+	 * @param string|null $append_to_main  Append position from canvas metadata when known.
+	 *
+	 * @return bool True when injection should proceed.
+	 */
+	private static function _register_canvas_page_injection(
+		string $canvas_id,
+		?bool $is_global = null,
+		int $owner_post_id = 0,
+		?string $append_to_main = null
+	): bool {
+		if ( ! isset( $GLOBALS['divi_off_canvas_injected_canvas_ids'] ) || ! is_array( $GLOBALS['divi_off_canvas_injected_canvas_ids'] ) ) {
+			$GLOBALS['divi_off_canvas_injected_canvas_ids'] = [];
+		}
+
+		$tracking_id = ( null === $is_global || $is_global )
+			? self::_get_canonical_global_canvas_id( $canvas_id )
+			: ( self::_normalize_slot_prefixed_canvas_id( $canvas_id ) ?: $canvas_id );
+
+		$is_page_wide_global_append = ( null === $is_global || $is_global )
+			&& ( 'above' === $append_to_main || 'below' === $append_to_main );
+
+		$dedupe_key = $is_page_wide_global_append
+			? 'global-append:' . $tracking_id
+			: (string) $owner_post_id . ':' . $tracking_id;
+
+		if ( isset( $GLOBALS['divi_off_canvas_injected_canvas_ids'][ $dedupe_key ] ) ) {
+			return false;
+		}
+
+		$GLOBALS['divi_off_canvas_injected_canvas_ids'][ $dedupe_key ] = true;
+
+		return true;
+	}
+
+	/**
+	 * Whether off-canvas hooks should skip during the_content.
+	 *
+	 * Skips only when Post Content renders inside a TB body layout (stack is et_body_layout).
+	 * Native main-post the_content on TB pages must still run when header/footer stacks are active.
+	 *
+	 * @since ??
+	 *
+	 * @param int $current_post_id Current post ID.
+	 *
+	 * @return bool
+	 */
+	private static function _should_skip_off_canvas_during_the_content( int $current_post_id ): bool {
+		if ( ! doing_filter( 'the_content' ) ) {
+			return false;
+		}
+
+		if ( null === self::_get_theme_builder_layout_post_id( $current_post_id ) ) {
+			return false;
+		}
+
+		if ( class_exists( '\ET_Post_Stack' ) ) {
+			$stacked_post = \ET_Post_Stack::get();
+			if ( $stacked_post && isset( $stacked_post->post_type ) && 'et_body_layout' === $stacked_post->post_type ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Whether a post ID refers to native page/post content (not a TB layout post type).
+	 *
+	 * @since ??
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return bool
+	 */
+	private static function _is_native_content_post_id( int $post_id ): bool {
+		if ( $post_id <= 0 ) {
+			return false;
+		}
+
+		$post_type = get_post_type( $post_id );
+
+		return is_string( $post_type )
+			&& ! in_array( $post_type, [ 'et_header_layout', 'et_body_layout', 'et_footer_layout' ], true );
+	}
+
+	/**
+	 * Resolve the post ID used for canvas render buckets and injection.
+	 *
+	 * Native main-post the_content must use the filtered post ID even when a TB header/footer
+	 * layout remains on ET_Post_Stack after template rendering.
+	 *
+	 * @since ??
+	 *
+	 * @param int $current_post_id Current post ID from _get_current_post_id().
+	 *
+	 * @return int
+	 */
+	private static function _get_canvas_processing_post_id( int $current_post_id ): int {
+		if ( doing_filter( 'the_content' ) ) {
+			$the_content_post_id = self::_get_the_content_post_id();
+			if ( self::_is_native_content_post_id( $the_content_post_id ) ) {
+				return $the_content_post_id;
+			}
+		}
+
+		$layout_post_id = self::_get_theme_builder_layout_post_id( $current_post_id );
+
+		return null !== $layout_post_id ? $layout_post_id : $current_post_id;
+	}
+
+	/**
+	 * Resolve the post ID for the_content filter execution.
+	 *
+	 * TB header/footer rendering can leave a layout on ET_Post_Stack while native page
+	 * body is filtered via the_content without setup_postdata().
+	 *
+	 * @since ??
+	 *
+	 * @return int Post ID or 0 when unknown.
+	 */
+	private static function _get_the_content_post_id(): int {
+		$candidates = [];
+
+		$the_id = get_the_ID();
+		if ( $the_id > 0 ) {
+			$candidates[] = (int) $the_id;
+		}
+
+		global $post;
+		if ( $post && isset( $post->ID ) && (int) $post->ID > 0 ) {
+			$candidates[] = (int) $post->ID;
+		}
+
+		if ( class_exists( '\ET_Post_Stack' ) ) {
+			$main_post = \ET_Post_Stack::get_main_post();
+			if ( $main_post && isset( $main_post->ID ) && (int) $main_post->ID > 0 ) {
+				$candidates[] = (int) $main_post->ID;
+			}
+		}
+
+		if ( is_singular() ) {
+			$queried_id = get_queried_object_id();
+			if ( $queried_id > 0 ) {
+				$candidates[] = (int) $queried_id;
+			}
+		}
+
+		global $wp_query;
+		if ( isset( $wp_query->post->ID ) && (int) $wp_query->post->ID > 0 ) {
+			$candidates[] = (int) $wp_query->post->ID;
+		}
+
+		foreach ( $candidates as $candidate_id ) {
+			if ( self::_is_native_content_post_id( $candidate_id ) ) {
+				return $candidate_id;
+			}
+		}
+
+		return $candidates[0] ?? 0;
 	}
 
 	/**
@@ -2040,6 +2290,30 @@ class OffCanvasHooks {
 	}
 
 	/**
+	 * Check whether a local canvas is owned by the given post ID.
+	 *
+	 * Local canvases merged from other owners (e.g. page canvases while rendering a TB header)
+	 * must not be appended from the wrong rendering context.
+	 *
+	 * @since ??
+	 *
+	 * @param array $canvas_meta Canvas metadata from DynamicAssetsUtils.
+	 * @param int   $post_id     Expected owner post ID.
+	 *
+	 * @return bool
+	 */
+	private static function _local_canvas_belongs_to_post( array $canvas_meta, int $post_id ): bool {
+		$canvas_post_id = absint( $canvas_meta['postId'] ?? 0 );
+		if ( 0 === $canvas_post_id ) {
+			return false;
+		}
+
+		$parent_post_id = absint( get_post_meta( $canvas_post_id, '_divi_canvas_parent_post_id', true ) );
+
+		return $parent_post_id === $post_id;
+	}
+
+	/**
 	 * Render off-canvas content through Divi's normal block processing to generate CSS.
 	 *
 	 * @since ??
@@ -2054,6 +2328,11 @@ class OffCanvasHooks {
 		$canvas_meta         = $all_canvas_metadata[ $canvas_id ] ?? null;
 
 		if ( ! $canvas_meta ) {
+			return;
+		}
+
+		$is_global = $canvas_meta['isGlobal'] ?? false;
+		if ( $is_global && self::_is_global_canvas_already_rendered_for_page( $canvas_id ) ) {
 			return;
 		}
 
@@ -2221,16 +2500,9 @@ class OffCanvasHooks {
 					}
 				}
 
-				// Check if this global canvas has already been rendered.
-				if ( isset( $GLOBALS['divi_off_canvas_global_rendered'][ $canvas_id ] ) ) {
-					$rendered_context = $GLOBALS['divi_off_canvas_global_rendered'][ $canvas_id ];
-					// Skip if already rendered in a higher priority context.
-					if ( self::_is_higher_priority_context( $rendered_context, $rendering_context ) ) {
-						continue;
-					}
-					// Current context has higher priority, so we should render here instead.
-					// Remove the old entry so we can re-render in the higher priority context.
-					unset( $GLOBALS['divi_off_canvas_global_rendered'][ $canvas_id ] );
+				// Check if this global canvas has already been rendered anywhere on this page (#50537).
+				if ( self::_is_global_canvas_already_rendered_for_page( $canvas_id ) ) {
+					continue;
 				}
 
 				// Store rendering context for marking after successful render.
@@ -2240,6 +2512,11 @@ class OffCanvasHooks {
 					'rendering_context' => $rendering_context,
 				];
 			} else {
+				$canvas_meta_data = $all_canvas_metadata[ $canvas_id ] ?? null;
+				if ( ! $canvas_meta_data || ! self::_local_canvas_belongs_to_post( $canvas_meta_data, $post_id ) ) {
+					continue;
+				}
+
 				// Local canvases can be reachable from multiple owner contexts (post + active templates)
 				// in the same request. Render each local canvas UID once to prevent duplicate output.
 				$local_canvas_key = self::_normalize_slot_prefixed_canvas_id( (string) $canvas_id );
@@ -2278,7 +2555,8 @@ class OffCanvasHooks {
 
 			// Mark global canvas as rendered after successful render.
 			if ( $is_global && isset( $canvas_info['rendering_context'] ) ) {
-				$GLOBALS['divi_off_canvas_global_rendered'][ $canvas_id ] = $canvas_info['rendering_context'];
+				$canonical_canvas_id = self::_get_canonical_global_canvas_id( $canvas_id );
+				$GLOBALS['divi_off_canvas_global_rendered'][ $canonical_canvas_id ] = $canvas_info['rendering_context'];
 			} elseif ( ! $is_global ) {
 				$local_canvas_key = $canvas_info['local_canvas_key'] ?? (string) $canvas_id;
 				$GLOBALS['divi_off_canvas_local_rendered'][ $local_canvas_key ] = true;
@@ -2288,7 +2566,6 @@ class OffCanvasHooks {
 
 	/**
 	 * Get the current rendering context.
-	 * Returns the context type to determine priority for global canvas rendering.
 	 * Cached per request to avoid redundant calls, but should be cleared when rendering context changes.
 	 *
 	 * @since ??
@@ -2296,6 +2573,15 @@ class OffCanvasHooks {
 	 * @return string Rendering context: 'post_content', 'body_template', 'header_template', 'footer_template'.
 	 */
 	private static function _get_rendering_context() {
+		// Native post/page body via the_content wins over cached TB template context from prior passes.
+		if ( doing_filter( 'the_content' ) ) {
+			$the_id = self::_get_the_content_post_id();
+			if ( self::_is_native_content_post_id( $the_id ) ) {
+				self::$_rendering_context_cache = 'post_content';
+				return self::$_rendering_context_cache;
+			}
+		}
+
 		// Return cached value if available.
 		if ( null !== self::$_rendering_context_cache ) {
 			return self::$_rendering_context_cache;
@@ -2366,31 +2652,6 @@ class OffCanvasHooks {
 	}
 
 	/**
-	 * Check if the first context has higher priority than the second.
-	 * Priority order: post_content > body_template > header_template > footer_template.
-	 *
-	 * @since ??
-	 *
-	 * @param string $context1 First context.
-	 * @param string $context2 Second context.
-	 *
-	 * @return bool True if context1 has higher priority than context2.
-	 */
-	private static function _is_higher_priority_context( $context1, $context2 ) {
-		$priority = [
-			'post_content'    => 4,
-			'body_template'   => 3,
-			'header_template' => 2,
-			'footer_template' => 1,
-		];
-
-		$priority1 = $priority[ $context1 ] ?? 0;
-		$priority2 = $priority[ $context2 ] ?? 0;
-
-		return $priority1 > $priority2;
-	}
-
-	/**
 	 * Inject canvas content for interactions and appended canvases on the frontend.
 	 * This injects pre-processed off-canvas content that was rendered during block processing.
 	 *
@@ -2416,10 +2677,8 @@ class OffCanvasHooks {
 			return $content;
 		}
 
-		// Skip canvas injection during the_content when in Theme Builder layout context.
-		// This prevents post ID confusion when Post Content module renders content within TB layouts,
-		// but allows canvas injection for regular posts rendered via the_content.
-		if ( doing_filter( 'the_content' ) && self::_get_theme_builder_layout_post_id( $current_post_id ) !== null ) {
+		// Skip canvas injection during the_content only for Post Content inside TB body layouts.
+		if ( self::_should_skip_off_canvas_during_the_content( $current_post_id ) ) {
 			return $content;
 		}
 
@@ -2431,8 +2690,7 @@ class OffCanvasHooks {
 
 		// In Theme Builder layouts, always use the layout post ID for canvas injection.
 		// This ensures interactions defined in layouts inject the correct canvas content.
-		$layout_post_id = self::_get_theme_builder_layout_post_id( $current_post_id );
-		$canvas_post_id = null !== $layout_post_id ? $layout_post_id : $current_post_id;
+		$canvas_post_id = self::_get_canvas_processing_post_id( $current_post_id );
 
 		// Only inject canvases that were rendered for the canvas post (layout post in TB context).
 		// This ensures canvases are injected using the correct post ID where they're stored.
@@ -2466,11 +2724,15 @@ class OffCanvasHooks {
 
 		foreach ( $rendered_canvases as $canvas_id => $rendered_html ) {
 			$canvas_meta = $all_canvases[ $canvas_id ] ?? null;
+			$is_global   = $canvas_meta['isGlobal'] ?? ( null === $canvas_meta );
+
 			if ( ! $canvas_meta ) {
 				// If canvas metadata not found, treat as interaction-targeted (legacy behavior).
 				// Skip if already included via Canvas Portal.
 				if ( ! in_array( $canvas_id, $canvas_portal_canvas_ids, true ) ) {
-					$interaction_content .= $rendered_html;
+					if ( self::_register_canvas_page_injection( $canvas_id, $is_global, $canvas_post_id ) ) {
+						$interaction_content .= $rendered_html;
+					}
 				}
 				continue;
 			}
@@ -2486,20 +2748,28 @@ class OffCanvasHooks {
 				}
 				// Still inject interaction-targeted canvases.
 				if ( ! in_array( $canvas_id, $canvas_portal_canvas_ids, true ) ) {
-					$interaction_content .= $rendered_html;
+					if ( self::_register_canvas_page_injection( $canvas_id, $is_global, $canvas_post_id, $append_to_main ) ) {
+						$interaction_content .= $rendered_html;
+					}
 				}
 				continue;
 			}
 
 			// Normal rendering: handle all canvas types.
 			if ( 'above' === $append_to_main ) {
-				$above_content .= $rendered_html;
+				if ( self::_register_canvas_page_injection( $canvas_id, $is_global, $canvas_post_id, $append_to_main ) ) {
+					$above_content .= $rendered_html;
+				}
 			} elseif ( 'below' === $append_to_main ) {
-				$below_content .= $rendered_html;
+				if ( self::_register_canvas_page_injection( $canvas_id, $is_global, $canvas_post_id, $append_to_main ) ) {
+					$below_content .= $rendered_html;
+				}
 			} elseif ( ! in_array( $canvas_id, $canvas_portal_canvas_ids, true ) ) {
 				// Interaction-targeted canvas (no appendToMainCanvas setting).
 				// Skip if already included via Canvas Portal.
-				$interaction_content .= $rendered_html;
+				if ( self::_register_canvas_page_injection( $canvas_id, $is_global, $canvas_post_id, $append_to_main ) ) {
+					$interaction_content .= $rendered_html;
+				}
 			}
 		}
 		// Build final content: CSS + above + main + below + interactions.

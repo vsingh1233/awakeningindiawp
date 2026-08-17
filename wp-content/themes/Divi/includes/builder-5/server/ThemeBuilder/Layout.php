@@ -137,6 +137,10 @@ class Layout {
 			// Use layout ID instead of 0 to ensure CSS file names include layout ID
 			// and prevent CSS file reuse on paginated pages.
 			$result = StaticCSS::setup_styles_manager( $layout_id );
+		} elseif ( is_search() || is_404() ) {
+			// Use the page-level styles manager so TB layout custom CSS is written to the same
+			// unified static CSS resource as module styles on search results pages and 404 pages.
+			$result = StaticCSS::setup_styles_manager( 0 );
 		} else {
 			$result = StaticCSS::setup_styles_manager( $layout_id );
 		}

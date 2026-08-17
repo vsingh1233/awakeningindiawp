@@ -10,7 +10,7 @@ import { readJson } from "../core/io.mjs";
 import { resolveSummaryCacheDir } from "../summary/summary.mjs";
 import { loadConfig } from "../core/config.mjs";
 import { resolveLatestPrRun, resolvePrRuns } from "../core/paths.mjs";
-import { classifySize } from "../reviewers/selection.mjs";
+import { classifySize, isLowSignalReviewFile } from "../reviewers/selection.mjs";
 import {
   buildTaskContext,
   applyPrBodyTaskFallback,
@@ -19,7 +19,9 @@ import {
   fetchPrByNumber,
   fetchPrCommits,
   fetchPrFiles,
+  fetchPrReviews,
   fetchReviewThreads,
+  extractDiffPaths,
   buildRelatedPath,
   getFilePatch,
   getNameStatusForMode,
@@ -42,7 +44,16 @@ import {
 import { unique } from "../core/utils.mjs";
 
 const isSnapshotFile = (filePath) =>
-  null != filePath && /(?:^|\/)__snapshots__\//.test(filePath);
+  true === isLowSignalReviewFile(filePath);
+
+const isTestPath = (filePath) =>
+  null != filePath &&
+  /(?:^|\/)(?:__tests__|__mocks__)\/|\.(?:test|spec)\.[^.]+$|Test\.php$/i.test(
+    filePath
+  );
+
+const isSpecPath = (filePath) =>
+  null != filePath && /(?:^|\/)specs\//i.test(filePath);
 
 const isExcludedFromSizing = (filePath) =>
   true === isTaskFile(filePath) || true === isSnapshotFile(filePath);
@@ -219,14 +230,60 @@ const buildRetroReviewContext = ({
   }
   const previousRun = resolveLatestPrRun(repoRoot, prNumber);
   const priorDigest = buildPriorRunDigest({ repoRoot, prNumber });
-  const sinceTimestamp =
-    toTimestamp(previousRun?.started_at) ?? toTimestamp(runStartedAt) ?? 0;
   if (0 < priorDigest.stats.run_count) {
     log(
       `[retro-review] prior runs=${priorDigest.stats.run_count} total_findings=${priorDigest.stats.total_findings} repeat_findings=${priorDigest.stats.repeat_findings}`
     );
   }
   const botLogin = normalizeLogin(config?.feedback_bot_login || "DeepHiveET");
+  let priorBotReviews = [];
+  try {
+    const reviews = fetchPrReviews({ prNumber, repoSlug });
+    priorBotReviews = reviews
+      .filter((review) => {
+        const login = normalizeLogin(review?.user?.login);
+        const state = String(review?.state || "").toUpperCase();
+        return (
+          botLogin === login &&
+          "PENDING" !== state &&
+          null != review?.commit_id &&
+          "" !== String(review.commit_id).trim()
+        );
+      })
+      .map((review) => ({
+        id: review?.id ?? null,
+        state: review?.state ?? null,
+        commit_id: review?.commit_id ?? null,
+        submitted_at: review?.submitted_at ?? null,
+      }))
+      .sort((a, b) => {
+        const timeA = toTimestamp(a.submitted_at) || 0;
+        const timeB = toTimestamp(b.submitted_at) || 0;
+        return timeA - timeB;
+      });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(`[retro-review] warning: failed to fetch PR reviews. ${message}`);
+    priorBotReviews = [];
+  }
+  const lastBotReview = priorBotReviews.length
+    ? priorBotReviews[priorBotReviews.length - 1]
+    : null;
+  const reviewRound = priorBotReviews.length + 1;
+  const previousHeadSha =
+    lastBotReview?.commit_id || previousRun?.run?.head_sha || null;
+  const sameShaAsLastReview =
+    null != previousHeadSha &&
+    null != currentHeadSha &&
+    previousHeadSha === currentHeadSha;
+  const sinceTimestamp =
+    toTimestamp(lastBotReview?.submitted_at) ??
+    toTimestamp(previousRun?.started_at) ??
+    toTimestamp(runStartedAt) ??
+    0;
+  log(
+    `[retro-review] round=${reviewRound} prior_bot_reviews=${priorBotReviews.length} previous_head=${previousHeadSha || "(none)"} same_sha=${sameShaAsLastReview}`
+  );
   let threads = [];
   try {
     threads = fetchReviewThreads({ prNumber, repoSlug });
@@ -386,37 +443,59 @@ const buildRetroReviewContext = ({
       return date >= sinceTimestamp;
     });
   let diffSinceLastRun = null;
-  const previousHeadSha = previousRun?.run?.head_sha || null;
-  if (
+  let rawDiffSinceLastRun = null;
+  if (true === sameShaAsLastReview) {
+    diffSinceLastRun = "";
+    rawDiffSinceLastRun = "";
+    log("[retro-review] no new commits since last DeepHive review.");
+  } else if (
     null != previousHeadSha &&
     null != currentHeadSha &&
     previousHeadSha !== currentHeadSha
   ) {
     try {
-      const rawDiff = fetchCompareDiff({
+      rawDiffSinceLastRun = fetchCompareDiff({
         repoSlug,
         baseSha: previousHeadSha,
         headSha: currentHeadSha,
       });
-      diffSinceLastRun = truncateBody(rawDiff, 12000);
+      diffSinceLastRun = truncateBody(rawDiffSinceLastRun, 20000);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log(`[retro-review] warning: failed to fetch compare diff. ${message}`);
     }
-  } else if (null == previousHeadSha) {
-    log("[retro-review] warning: previous run head sha missing.");
+  } else if (null == previousHeadSha && reviewRound > 1) {
+    log("[retro-review] warning: previous review head sha missing.");
   }
+  const deltaPaths = extractDiffPaths(rawDiffSinceLastRun);
+  const deltaHasTests = deltaPaths.some((filePath) => isTestPath(filePath));
+  const deltaHasSpecs = deltaPaths.some((filePath) => isSpecPath(filePath));
+  const hasPriorFeedback =
+    0 < priorBotReviews.length ||
+    0 < normalizedThreads.length ||
+    0 < priorDigest.stats.run_count;
+  const effectiveReviewRound = Math.max(
+    priorBotReviews.length,
+    true === hasPriorFeedback ? 1 : 0
+  ) + 1;
   return {
     enabled: true,
+    review_round: effectiveReviewRound,
+    same_sha_as_last_review: sameShaAsLastReview,
     previous_run: previousRun
       ? {
           run_id: previousRun.run_id,
           started_at: previousRun.started_at,
         }
       : null,
+    last_bot_review: lastBotReview,
+    prior_bot_review_count: priorBotReviews.length,
     diff_base_sha: previousHeadSha,
     diff_head_sha: currentHeadSha || null,
     diff_since_last_run: diffSinceLastRun,
+    delta_paths: deltaPaths.slice(0, 80),
+    delta_has_tests: deltaHasTests,
+    delta_has_specs: deltaHasSpecs,
     bot_login: botLogin,
     summary: priorDigest.stats,
     prior_runs: priorDigest.runs,
@@ -489,9 +568,12 @@ export const collectFacts = task({ name: "collectFacts" }, async (input) => {
       ":(exclude).cursor/tasks/**",
       ":(exclude)**/__snapshots__/**",
     ]);
-    patchForSizing = [unstagedPatch, stagedPatch]
-      .filter((patch) => patch && patch.trim())
-      .join("\n\n");
+    patchForSizing = filterPatchByPredicate(
+      [unstagedPatch, stagedPatch]
+        .filter((patch) => patch && patch.trim())
+        .join("\n\n"),
+      (filePath) => false === isExcludedFromSizing(filePath)
+    );
     rawPatchForSizing = run("git", [
       "diff",
       "--patch",
@@ -541,19 +623,22 @@ export const collectFacts = task({ name: "collectFacts" }, async (input) => {
     ])
       .split("\n")
       .filter(Boolean);
-    patchForSizing = run("git", [
-      "diff",
-      "--patch",
-      `--unified=${contextLines}`,
-      `${baseRef}...${headRef}`,
-      "--",
-      ".",
-      ":(exclude)includes/builder-5/et/tasks/**",
-      ":(exclude)includes/builder-5/.et/tasks/**",
-      ":(exclude)et/tasks/**",
-      ":(exclude).cursor/tasks/**",
-      ":(exclude)**/__snapshots__/**",
-    ]);
+    patchForSizing = filterPatchByPredicate(
+      run("git", [
+        "diff",
+        "--patch",
+        `--unified=${contextLines}`,
+        `${baseRef}...${headRef}`,
+        "--",
+        ".",
+        ":(exclude)includes/builder-5/et/tasks/**",
+        ":(exclude)includes/builder-5/.et/tasks/**",
+        ":(exclude)et/tasks/**",
+        ":(exclude).cursor/tasks/**",
+        ":(exclude)**/__snapshots__/**",
+      ]),
+      (filePath) => false === isExcludedFromSizing(filePath)
+    );
     rawPatchForSizing = run("git", [
       "diff",
       "--patch",

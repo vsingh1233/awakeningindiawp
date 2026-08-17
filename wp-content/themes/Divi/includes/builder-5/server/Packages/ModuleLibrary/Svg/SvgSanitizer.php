@@ -26,6 +26,16 @@ class SvgSanitizer {
 	private const SAME_DOCUMENT_FRAGMENT_REFERENCE_PATTERN = '/^#[A-Za-z_][\w:.-]*$/';
 
 	/**
+	 * Tag-to-attribute map that requires same-document fragment references.
+	 *
+	 * @var array<string, array<int, string>>
+	 */
+	private const FRAGMENT_REFERENCE_ATTRIBUTES_BY_TAG = [
+		'use'      => [ 'href', 'xlink:href' ],
+		'textpath' => [ 'href', 'xlink:href' ],
+	];
+
+	/**
 	 * Sanitize inline SVG markup.
 	 *
 	 * @param string $markup Raw SVG markup.
@@ -41,20 +51,29 @@ class SvgSanitizer {
 
 		$sanitized_markup = wp_kses( $markup, wp_kses_array_lc( SvgAllowedList::get_allowed_svg_html() ) );
 
-		// Apply a value-level guard for `<use>` references after attribute-name allowlisting.
+		// Apply a value-level guard for fragment reference attributes after allowlisting.
 		// This prevents external/non-fragment references from surviving sanitization.
-		return self::sanitize_use_reference_attributes( $sanitized_markup );
+		return self::_sanitize_fragment_reference_attributes( $sanitized_markup );
 	}
 
 	/**
-	 * Restrict `<use>` href/xlink:href values to same-document fragments.
+	 * Restrict fragment reference attributes to same-document fragments.
 	 *
 	 * @param string $markup Sanitized SVG markup.
 	 *
 	 * @return string
 	 */
-	private static function sanitize_use_reference_attributes( string $markup ): string {
-		if ( '' === $markup || false === stripos( $markup, '<use' ) ) {
+	private static function _sanitize_fragment_reference_attributes( string $markup ): string {
+		$has_relevant_tag = false;
+
+		foreach ( array_keys( self::FRAGMENT_REFERENCE_ATTRIBUTES_BY_TAG ) as $tag_name ) {
+			if ( false !== stripos( $markup, '<' . $tag_name ) ) {
+				$has_relevant_tag = true;
+				break;
+			}
+		}
+
+		if ( '' === $markup || ! $has_relevant_tag ) {
 			return $markup;
 		}
 
@@ -69,34 +88,44 @@ class SvgSanitizer {
 			return $markup;
 		}
 
-		$use_nodes = $document->getElementsByTagName( 'use' );
-
-		for ( $index = 0; $index < $use_nodes->length; $index++ ) {
-			$use_node = $use_nodes->item( $index );
-
-			if ( null === $use_node || ! $use_node->hasAttributes() ) {
+		foreach ( self::FRAGMENT_REFERENCE_ATTRIBUTES_BY_TAG as $tag_name => $reference_attributes ) {
+			if ( false === stripos( $markup, '<' . $tag_name ) ) {
 				continue;
 			}
 
-			$attributes_to_remove = [];
+			$nodes = $document->getElementsByTagName( $tag_name );
 
-			foreach ( $use_node->attributes as $attribute ) {
-				$attribute_name = strtolower( $attribute->nodeName );
+			if ( 0 === $nodes->length && 'textpath' === $tag_name ) {
+				$nodes = $document->getElementsByTagName( 'textPath' );
+			}
 
-				if ( ! in_array( $attribute_name, [ 'href', 'xlink:href' ], true ) ) {
+			for ( $index = 0; $index < $nodes->length; $index++ ) {
+				$node = $nodes->item( $index );
+
+				if ( null === $node || ! $node->hasAttributes() ) {
 					continue;
 				}
 
-				$attribute_value = trim( (string) $attribute->nodeValue );
-				$is_fragment_ref = 1 === preg_match( self::SAME_DOCUMENT_FRAGMENT_REFERENCE_PATTERN, $attribute_value );
+				$attributes_to_remove = [];
 
-				if ( ! $is_fragment_ref ) {
-					$attributes_to_remove[] = $attribute->nodeName;
+				foreach ( $node->attributes as $attribute ) {
+					$attribute_name = strtolower( $attribute->nodeName );
+
+					if ( ! in_array( $attribute_name, $reference_attributes, true ) ) {
+						continue;
+					}
+
+					$attribute_value = trim( (string) $attribute->nodeValue );
+					$is_fragment_ref = 1 === preg_match( self::SAME_DOCUMENT_FRAGMENT_REFERENCE_PATTERN, $attribute_value );
+
+					if ( ! $is_fragment_ref ) {
+						$attributes_to_remove[] = $attribute->nodeName;
+					}
 				}
-			}
 
-			foreach ( $attributes_to_remove as $attribute_name ) {
-				$use_node->removeAttribute( $attribute_name );
+				foreach ( $attributes_to_remove as $attribute_name ) {
+					$node->removeAttribute( $attribute_name );
+				}
 			}
 		}
 

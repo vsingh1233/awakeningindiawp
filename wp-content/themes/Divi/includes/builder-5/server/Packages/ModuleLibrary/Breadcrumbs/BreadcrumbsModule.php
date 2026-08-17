@@ -27,6 +27,7 @@ use ET\Builder\Packages\ModuleLibrary\ModuleRegistration;
 use WP_Block;
 use WP_Post;
 use WP_Term;
+use WP_User;
 
 /**
  * Breadcrumbs module class.
@@ -286,6 +287,12 @@ class BreadcrumbsModule implements DependencyInterface {
 
 		if ( null !== $error_items ) {
 			return $error_items;
+		}
+
+		$author_items = self::_get_author_items( $items );
+
+		if ( null !== $author_items ) {
+			return $author_items;
 		}
 
 		return self::_get_fallback_items( $items );
@@ -569,6 +576,44 @@ class BreadcrumbsModule implements DependencyInterface {
 	}
 
 	/**
+	 * Builds breadcrumb items for runtime author archive requests.
+	 *
+	 * Uses the queried author object instead of `get_the_archive_title()`.
+	 * Core archive titles call `get_the_author()`, which follows the current
+	 * post after Theme Builder swaps in a layout post and can show the wrong name.
+	 *
+	 * @since ??
+	 *
+	 * @param array<int, array{label:string,url:string,isCurrent:bool}> $items Seed breadcrumb items.
+	 *
+	 * @return array<int, array{label:string,url:string,isCurrent:bool}>|null
+	 */
+	private static function _get_author_items( array $items ): ?array {
+		if ( ! is_author() ) {
+			return null;
+		}
+
+		$author = get_queried_object();
+
+		if ( ! $author instanceof WP_User ) {
+			return null;
+		}
+
+		$items[] = self::_create_breadcrumb_item(
+			sprintf(
+				/* translators: 1: Title prefix. 2: Title. */
+				_x( '%1$s %2$s', 'archive title', 'et_builder_5' ),
+				_x( 'Author:', 'author archive title prefix', 'et_builder_5' ),
+				$author->display_name
+			),
+			'',
+			true
+		);
+
+		return $items;
+	}
+
+	/**
 	 * Builds breadcrumb items for the generic fallback branch.
 	 *
 	 * @since ??
@@ -578,10 +623,11 @@ class BreadcrumbsModule implements DependencyInterface {
 	 * @return array<int, array{label:string,url:string,isCurrent:bool}>
 	 */
 	private static function _get_fallback_items( array $items ): array {
-		$title = get_the_archive_title();
+		// Strip core archive-title markup (e.g. Year: <span>2020</span>) so labels stay plain text under esc_html.
+		$title = wp_strip_all_tags( get_the_archive_title() );
 
 		if ( '' === $title ) {
-			$title = wp_get_document_title();
+			$title = wp_strip_all_tags( wp_get_document_title() );
 		}
 
 		$items[] = self::_create_breadcrumb_item(
@@ -696,7 +742,19 @@ class BreadcrumbsModule implements DependencyInterface {
 	private static function _append_post_ancestor_items( array $items, WP_Post $post ): array {
 		$ancestor_ids = array_reverse( get_post_ancestors( $post->ID ) );
 
+		if ( empty( $ancestor_ids ) ) {
+			return $items;
+		}
+
+		$front_page_id = 'page' === get_option( 'show_on_front' )
+			? (int) get_option( 'page_on_front' )
+			: 0;
+
 		foreach ( $ancestor_ids as $ancestor_id ) {
+			if ( $front_page_id > 0 && ( (int) $ancestor_id ) === $front_page_id ) {
+				continue;
+			}
+
 			$items[] = self::_create_breadcrumb_item(
 				get_the_title( $ancestor_id ),
 				get_permalink( $ancestor_id )

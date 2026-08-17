@@ -200,7 +200,14 @@ class ShortcodeUtils {
 		// No context switching needed if post IDs match or main post invalid.
 		// Also skip if a loop post context is already active — with_loop_post_context() has set
 		// $post to the loop item and shortcode_wrapper() must not override it with the main post.
-		if ( ! $main_post || $current_post_id === $main_post_id || DynamicContentUtils::has_active_loop_post_context() ) {
+		// Also skip inside an active WooCommerce product loop item ([products], related, etc.)
+		// so nested wishlist/compare shortcodes do not rewrite $post / $product mid-loop.
+		if (
+			! $main_post
+			|| $current_post_id === $main_post_id
+			|| DynamicContentUtils::has_active_loop_post_context()
+			|| self::_has_active_woocommerce_product_loop_context()
+		) {
 			return call_user_func( $original_callback, $atts, $content, $tag );
 		}
 
@@ -229,6 +236,40 @@ class ShortcodeUtils {
 		}
 
 		return $output;
+	}
+
+	/**
+	 * Whether the current post is already an intentional WooCommerce product loop item.
+	 *
+	 * Used by `shortcode_wrapper()` to avoid overriding the loop product with
+	 * `ET_Post_Stack::get_main_post()` when nested third-party shortcodes run mid-loop
+	 * (e.g. wishlist/compare buttons inside `[products]`).
+	 *
+	 * Reads `$GLOBALS['woocommerce_loop']` directly instead of `wc_get_loop_prop()` so
+	 * this check does not initialize a default loop via `wc_setup_loop()`.
+	 *
+	 * @since ??
+	 *
+	 * @return bool True when inside a WC shortcode/named product loop on a product post.
+	 */
+	private static function _has_active_woocommerce_product_loop_context(): bool {
+		if ( empty( $GLOBALS['woocommerce_loop'] ) || ! is_array( $GLOBALS['woocommerce_loop'] ) ) {
+			return false;
+		}
+
+		$is_shortcode_loop = ! empty( $GLOBALS['woocommerce_loop']['is_shortcode'] );
+		$loop_name         = $GLOBALS['woocommerce_loop']['name'] ?? '';
+
+		// Shortcode loops ([products]) and named loops (related, up-sells, cross-sells).
+		// Singular product context (`is_product`) alone must not match — TB shortcodes on
+		// single-product templates still need main-post correction (#41239).
+		if ( ! $is_shortcode_loop && '' === $loop_name ) {
+			return false;
+		}
+
+		$current_post_id = get_the_ID();
+
+		return 0 < $current_post_id && 'product' === get_post_type( $current_post_id );
 	}
 
 	/**

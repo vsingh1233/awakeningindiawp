@@ -872,7 +872,15 @@ class FullwidthPostSliderModule implements DependencyInterface {
 				$featured_image          = has_post_thumbnail() ? esc_url( wp_get_attachment_url( get_post_thumbnail_id() ) ) : '';
 				$slide_image             = ! empty( $background_image_url ) ? $background_image_url : $featured_image;
 				$slide_selector          = sprintf( '.et_pb_post_slide-%d', get_the_ID() );
-				$slide_style             = 'background' === $image_placement && ! empty( $slide_image )
+				$slide_parallax_data      = PostSliderBackgroundStyles::get_slide_parallax_data(
+					$loop_background_attrs,
+					$attrs['image']['advanced']['enable'] ?? [],
+					$image_placement,
+					$slide_image
+				);
+				$slide_background_attrs   = $slide_parallax_data['background_attrs'];
+				$is_slide_parallax_enabled = $slide_parallax_data['is_parallax_enabled'];
+				$slide_style = 'background' === $image_placement && ! empty( $slide_image ) && ! $is_slide_parallax_enabled
 					? PostSliderBackgroundStyles::get_slide_background_styles(
 						$loop_background_attrs,
 						$attrs['image']['advanced']['enable'] ?? [],
@@ -904,6 +912,18 @@ class FullwidthPostSliderModule implements DependencyInterface {
 					);
 				}
 
+				$slide_background_component = '';
+
+				if ( $is_slide_parallax_enabled ) {
+					$slide_classnames->add( 'et_pb_section_parallax', true );
+					$slide_background_component = PostSliderBackgroundStyles::get_slide_parallax_component(
+						$elements,
+						$block->parsed_block['id'] ?? 'fullwidth-post-slider',
+						get_the_ID(),
+						$slide_background_attrs
+					);
+				}
+
 				// Slide.
 				$slides[] = $elements->render(
 					[
@@ -913,6 +933,7 @@ class FullwidthPostSliderModule implements DependencyInterface {
 							'style' => ! empty( $slide_style ) ? $slide_style : null,
 						],
 						'children'          => [
+							$slide_background_component,
 							$slide_overlay,
 							$slide_container,
 						],

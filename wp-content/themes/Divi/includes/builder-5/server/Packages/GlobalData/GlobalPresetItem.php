@@ -237,11 +237,10 @@ class GlobalPresetItem {
 		}
 
 		if ( ! is_bool( $this->_has_data_attrs ) ) {
-			// Get the data attrs.
-			$attrs = $this->get_data_attrs();
+			$attrs       = $this->get_data_attrs();
+			$style_attrs = $this->get_data_style_attrs();
 
-			// Set the flag.
-			$this->_has_data_attrs = ! empty( $attrs );
+			$this->_has_data_attrs = ! empty( $attrs ) || ! empty( $style_attrs );
 		}
 
 		return $this->_has_data_attrs;

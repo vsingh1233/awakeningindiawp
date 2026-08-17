@@ -282,6 +282,9 @@
                     "fieldLabel": "Title",
                     "dynamicSubgroupHost": true,
                     "fields": {
+                      "color": {
+                        "render": false
+                      },
                       "headingLevel": {
                         "render": true
                       }

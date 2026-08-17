@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 use ET\Builder\Framework\Controllers\RESTController;
-use ET\Builder\Framework\Utility\HTMLUtility;
+use ET\Builder\Packages\ModuleUtils\FormMarkupSecurityUtils;
 use ET\Builder\Framework\UserRole\UserRole;
 use ET\Builder\Packages\IconLibrary\IconFont\Utils;
 use WP_REST_Request;
@@ -25,80 +25,6 @@ use WP_REST_Response;
  * @since ??
  */
 class ContactForm7Controller extends RESTController {
-
-	/**
-	 * Normalize class tokens and remove invalid/empty values.
-	 *
-	 * @since ??
-	 *
-	 * @param string $raw_class_names Raw class attribute value.
-	 *
-	 * @return string[]
-	 */
-	private static function _normalize_class_names( string $raw_class_names ): array {
-		$class_tokens = preg_split( '/\s+/', trim( $raw_class_names ) );
-
-		if ( ! is_array( $class_tokens ) ) {
-			return [];
-		}
-
-		$normalized_class_tokens = [];
-
-		foreach ( $class_tokens as $class_token ) {
-			$sanitized_class_token = sanitize_html_class( (string) $class_token );
-
-			if ( '' !== $sanitized_class_token ) {
-				$normalized_class_tokens[ $sanitized_class_token ] = true;
-			}
-		}
-
-		return array_keys( $normalized_class_tokens );
-	}
-
-	/**
-	 * Get allowed button attributes for kses sanitization.
-	 *
-	 * Build from HTMLUtility central attribute definitions and explicitly
-	 * remove event-handler attributes to prevent script injection.
-	 *
-	 * @since ??
-	 *
-	 * @return array<string, bool>
-	 */
-	private static function _get_allowed_button_attributes_for_kses(): array {
-		static $allowed_button_attributes = null;
-
-		if ( is_array( $allowed_button_attributes ) ) {
-			return $allowed_button_attributes;
-		}
-
-		$allowed_button_attributes = [
-			'type' => true,
-		];
-
-		foreach ( HTMLUtility::get_fixed_name_attributes() as $attribute_name => $attribute_details ) {
-			$elements = $attribute_details['elements'] ?? [];
-
-			if ( ! is_array( $elements ) || [] === $elements || in_array( 'button', $elements, true ) ) {
-				$allowed_button_attributes[ $attribute_name ] = true;
-			}
-		}
-
-		foreach ( HTMLUtility::get_wildcard_name_attributes() as $attribute_name => $attribute_details ) {
-			$elements = $attribute_details['elements'] ?? [];
-
-			if ( ! is_array( $elements ) || [] === $elements || in_array( 'button', $elements, true ) ) {
-				$allowed_button_attributes[ $attribute_name ] = true;
-			}
-		}
-
-		// Never allow event-handler attributes in transformed preview markup.
-		foreach ( array_keys( HTMLUtility::get_event_handler_attributes() ) as $attribute_name ) {
-			unset( $allowed_button_attributes[ $attribute_name ] );
-		}
-
-		return $allowed_button_attributes;
-	}
 
 	/**
 	 * Adds Divi button class to CF7 submit controls.
@@ -125,7 +51,7 @@ class ContactForm7Controller extends RESTController {
 					return $tag;
 				}
 
-				$classes = self::_normalize_class_names( (string) ( $class_matches[2] ?? '' ) );
+				$classes = FormMarkupSecurityUtils::normalize_class_names( (string) ( $class_matches[2] ?? '' ) );
 
 				if ( ! in_array( 'wpcf7-submit', $classes, true ) ) {
 					return $tag;
@@ -162,7 +88,7 @@ class ContactForm7Controller extends RESTController {
 					$sanitized_button_tag = wp_kses(
 						$updated_tag,
 						[
-							'button' => self::_get_allowed_button_attributes_for_kses(),
+							'button' => FormMarkupSecurityUtils::get_allowed_button_attributes_for_kses(),
 						]
 					);
 
@@ -199,7 +125,7 @@ class ContactForm7Controller extends RESTController {
 				$button_html = wp_kses(
 					$button_html,
 					[
-						'button' => self::_get_allowed_button_attributes_for_kses(),
+						'button' => FormMarkupSecurityUtils::get_allowed_button_attributes_for_kses(),
 					]
 				);
 
@@ -389,7 +315,7 @@ class ContactForm7Controller extends RESTController {
 					return $tag;
 				}
 
-				$classes = self::_normalize_class_names( (string) ( $class_matches[2] ?? '' ) );
+				$classes = FormMarkupSecurityUtils::normalize_class_names( (string) ( $class_matches[2] ?? '' ) );
 
 				if ( ! in_array( $layout_class, $classes, true ) ) {
 					$classes[] = $layout_class;

@@ -20,6 +20,7 @@ Use the "Prior review feedback" context in the prompt. It includes:
 1. Confirm that resolved threads are truly addressed by recent commits.
 2. Identify unresolved threads that still need work.
 3. Avoid re-raising findings that are unchanged or already corrected.
+4. Prefer silence when prior feedback was addressed. Empty findings is the successful outcome.
 
 ## How to Review
 
@@ -31,9 +32,14 @@ Use the "Prior review feedback" context in the prompt. It includes:
 - If a developer replies to the prior feedback and argues against it, evaluate
   their rationale using `recent_comments` and the diff since last run. Either
   confirm the resolution or reject it with a clear follow-up.
+- If the author added tests or specs in response to prior feedback, treat that
+  as addressed unless the new tests are broken or would still pass if the
+  reported issue were reintroduced.
 - Use diffs only when necessary to confirm the change; focus on the delta since
   the last run.
 - If there are no prior threads, return zero findings.
+- Do not invent new test, spec-map, or style findings. Other reviewers own new
+  issues in the delta.
 
 ## Confidence Guidance
 

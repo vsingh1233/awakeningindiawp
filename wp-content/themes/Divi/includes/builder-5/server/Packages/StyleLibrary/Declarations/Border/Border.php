@@ -65,7 +65,8 @@ class Border {
 			]
 		);
 
-		if ( $radius ) {
+		// Non-array values (e.g. string shorthand "12px") must not reach foreach.
+		if ( is_array( $radius ) && ! empty( $radius ) ) {
 			$valid_radius = [ 'topLeft', 'topRight', 'bottomRight', 'bottomLeft' ];
 
 			foreach ( $radius as $radii_size => $radii ) {

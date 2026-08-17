@@ -26,6 +26,8 @@ use ET\Builder\FrontEnd\Assets\DynamicAssets\DynamicAssetsDetection;
 use ET\Builder\FrontEnd\Assets\DynamicAssets\DynamicAssetsEnqueue;
 use ET\Builder\FrontEnd\Assets\DynamicAssets\DynamicAssetsListBuilder;
 use ET\Builder\FrontEnd\Assets\DynamicAssets\DynamicAssetsStore;
+use ET\Builder\FrontEnd\Assets\DynamicAssets\IntegrationAssetsProviderCollection;
+use ET\Builder\FrontEnd\Assets\DynamicAssets\IntegrationAssetsProviderRegistry;
 use ET\Builder\FrontEnd\Assets\DynamicAssets\State\CacheState;
 use ET\Builder\FrontEnd\Assets\DynamicAssets\State\DetectionState;
 use ET\Builder\FrontEnd\Assets\DynamicAssets\State\EnqueueState;
@@ -123,6 +125,20 @@ class DynamicAssets implements DependencyInterface {
 	private DynamicAssetsEnqueue $_enqueue;
 
 	/**
+	 * Request-scoped integration asset provider registry.
+	 *
+	 * @var IntegrationAssetsProviderRegistry
+	 */
+	private IntegrationAssetsProviderRegistry $_integration_assets_provider_registry;
+
+	/**
+	 * DA-internal integration asset provider lifecycle state.
+	 *
+	 * @var IntegrationAssetsProviderCollection
+	 */
+	private IntegrationAssetsProviderCollection $_integration_assets_provider_collection;
+
+	/**
 	 * Class instance.
 	 *
 	 * @since ??
@@ -144,6 +160,9 @@ class DynamicAssets implements DependencyInterface {
 	/**
 	 * Constructor - Initialize state objects and handlers.
 	 *
+	 * Integration provider infrastructure is constructed here. Providers register later through the
+	 * public registration action during eligible frontend `pre_initial_setup()`.
+	 *
 	 * @since ??
 	 */
 	public function __construct() {
@@ -164,6 +183,8 @@ class DynamicAssets implements DependencyInterface {
 		$this->_cache              = new DynamicAssetsCache( $this->_store );
 		$this->_dependency_checker = new DynamicAssetsDependencyChecker( $cache_state );
 		$this->_content            = new DynamicAssetsContent( $cache_state, $feature_state );
+		$this->_integration_assets_provider_collection = new IntegrationAssetsProviderCollection();
+		$this->_integration_assets_provider_registry   = new IntegrationAssetsProviderRegistry( $this->_integration_assets_provider_collection );
 		$this->_detection          = new DynamicAssetsDetection(
 			$cache_state,
 			$detection_state,
@@ -191,7 +212,8 @@ class DynamicAssets implements DependencyInterface {
 			$feature_state,
 			$this->_content,
 			$this->_detection,
-			$this->_dependency_checker
+			$this->_dependency_checker,
+			$this->_integration_assets_provider_collection
 		);
 	}
 
@@ -239,6 +261,48 @@ class DynamicAssets implements DependencyInterface {
 
 		// Save the instance.
 		self::$_instance = $this;
+	}
+
+	/**
+	 * Open the integration asset provider registration window, then seal the collection.
+	 *
+	 * Infrastructure objects are constructed in `__construct()`. Divi-owned integrations attach
+	 * always-eager callbacks before `wp`, independently of lazy module loading. Third-party
+	 * integrations must also attach the public action before `wp`. The collection seals after the
+	 * action completes.
+	 *
+	 * @since ??
+	 *
+	 * @return void
+	 */
+	private function _register_integration_asset_providers(): void {
+		if ( $this->_integration_assets_provider_collection->is_sealed() ) {
+			return;
+		}
+
+		/**
+		 * Fires when Dynamic Assets integration asset providers can be registered.
+		 *
+		 * Providers consume DA-owned request content and call their integration's supported public
+		 * enqueue API. This action does not expose or replace Dynamic Assets content gathering.
+		 * Divi-owned integrations use reserved `divi/*` IDs and attach at the earliest priority.
+		 * Third parties should register from plugin bootstrap or `init`, before `wp`; registrations
+		 * from lazily loaded module classes can be absent on warm-cache requests. Provider IDs must be
+		 * unique, lowercase namespaced slugs. Extensions supporting older Divi versions must guard or
+		 * defer loading classes that implement IntegrationAssetsProviderInterface. Supplied request
+		 * content must not be persisted, logged, or transmitted. Visual Builder and REST preview
+		 * assets remain the responsibility of each integration and are outside this frontend action.
+		 *
+		 * @since ??
+		 *
+		 * @param IntegrationAssetsProviderRegistry $registry Request-scoped provider registry.
+		 */
+		do_action(
+			'divi_frontend_assets_dynamic_assets_register_integration_asset_providers',
+			$this->_integration_assets_provider_registry
+		);
+
+		$this->_integration_assets_provider_collection->seal();
 	}
 
 	/**
@@ -378,6 +442,8 @@ class DynamicAssets implements DependencyInterface {
 			return;
 		}
 
+		$this->_register_integration_asset_providers();
+
 		$content_retriever = ET_Builder_Content_Retriever::init();
 		$current_post_id   = is_singular() && $post ? $post->ID : DynamicAssetsUtils::get_current_post_id();
 		$current_post      = get_post( $current_post_id );
@@ -402,13 +468,6 @@ class DynamicAssets implements DependencyInterface {
 		// Set folder_name now so cache lookup works for taxonomy pages.
 		$this->_store->cache()->folder_name = $this->_cache->get_folder_name();
 
-		// SIMPLIFICATION: Load cached features early if cache exists.
-		// This allows script enqueuing to use cached data without running detection.
-		if ( empty( $this->_store->detection()->early_attributes ) && $this->_cache->metadata_exists( '_divi_dynamic_assets_cached_feature_used' ) ) {
-			$this->_store->detection()->early_attributes            = $this->_cache->metadata_get( '_divi_dynamic_assets_cached_feature_used' );
-			$this->_store->detection()->early_attributes_from_cache = true;
-		}
-
 		// Store original post content to avoid redundant database queries.
 		$this->_store->cache()->original_post_content = $current_post ? $current_post->post_content : '';
 
@@ -419,21 +478,22 @@ class DynamicAssets implements DependencyInterface {
 		$_page_content = $this->_content->maybe_add_appended_canvas_content( $_page_content, $current_post_id );
 		$this->_content->set_all_content( $_page_content );
 
+		// Respect the top-level generation gate before any detection or cache state is populated.
+		if ( ! DynamicAssetsUtils::should_generate_dynamic_assets() ) {
+			$this->_maybe_prepare_shortcode_rendering_support( $this->_content->get_all_content() );
+			return;
+		}
+
+		// SIMPLIFICATION: Load cached features early if the cache exists.
+		// This allows script enqueuing to use cached data without running detection.
+		if ( empty( $this->_store->detection()->early_attributes ) && $this->_cache->metadata_exists( '_divi_dynamic_assets_cached_feature_used' ) ) {
+			$this->_store->detection()->early_attributes            = $this->_cache->metadata_get( '_divi_dynamic_assets_cached_feature_used' );
+			$this->_store->detection()->early_attributes_from_cache = true;
+		}
+
 		// When Dynamic Assets are disabled.
 		if ( ! DynamicAssetsUtils::should_initiate_dynamic_assets() ) {
-			$block_names = DetectFeature::get_block_names( $this->_content->get_all_content() );
-
-			// Check whether the content have shortcodes.
-			if ( DetectFeature::get_shortcode_names( $this->_content->get_all_content() ) ) {
-				// Add filters to get rid of random p tags.
-				add_filter( 'the_content', [ HTMLUtility::class, 'fix_builder_shortcodes' ] );
-				add_filter( 'et_builder_render_layout', [ HTMLUtility::class, 'fix_builder_shortcodes' ] );
-				add_filter( 'the_content', 'et_pb_the_content_prep_code_module_for_wpautop', 0 );
-				add_filter( 'et_builder_render_layout', 'et_pb_the_content_prep_code_module_for_wpautop', 0 );
-
-				// Check if we need to load WooCommerce framework early.
-				$this->maybe_load_early_framework( $this->_content->get_all_content() );
-			}
+			$this->_maybe_prepare_shortcode_rendering_support( $this->_content->get_all_content() );
 
 			// Bail early.
 			return;
@@ -445,7 +505,7 @@ class DynamicAssets implements DependencyInterface {
 
 			$this->_store->detection()->early_blocks     = $used_modules['blocks'] ?? [];
 			$this->_store->detection()->early_shortcodes = $used_modules['shortcodes'] ?? [];
-		} else {
+		} elseif ( DynamicAssetsUtils::should_run_detection() ) {
 			// If there are no cached modules, parse the post content to retrieve used blocks.
 			$used_modules = $this->_detection->get_early_modules( $this->_content->get_all_content() );
 
@@ -463,14 +523,7 @@ class DynamicAssets implements DependencyInterface {
 		}
 
 		if ( ! empty( $this->_store->detection()->early_shortcodes ) ) {
-			// Add filters to fix the shortcodes.
-			add_filter( 'the_content', [ HTMLUtility::class, 'fix_builder_shortcodes' ] );
-			add_filter( 'et_builder_render_layout', [ HTMLUtility::class, 'fix_builder_shortcodes' ] );
-			add_filter( 'the_content', 'et_pb_the_content_prep_code_module_for_wpautop', 0 );
-			add_filter( 'et_builder_render_layout', 'et_pb_the_content_prep_code_module_for_wpautop', 0 );
-
-			// Check if we need to load WooCommerce framework early.
-			$this->maybe_load_early_framework( $this->_content->get_all_content() );
+			$this->_maybe_prepare_shortcode_rendering_support( $this->_content->get_all_content(), true );
 		}
 
 		// Update _early_modules.
@@ -483,11 +536,13 @@ class DynamicAssets implements DependencyInterface {
 		// Cache has_excerpt_content_on early so StaticCSS can use it.
 		// Check cached features first to avoid unnecessary detection when cached.
 		// The result is automatically cached in detection_state->early_attributes by get_cached_or_detect_feature().
-		$this->_detection->get_cached_or_detect_feature(
-			'excerpt_content_on',
-			[ DetectFeature::class, 'has_excerpt_content_on' ],
-			[ $this->_content->get_all_content(), $this->_store->detection()->options ]
-		);
+		if ( DynamicAssetsUtils::should_run_detection() ) {
+			$this->_detection->get_cached_or_detect_feature(
+				'excerpt_content_on',
+				[ DetectFeature::class, 'has_excerpt_content_on' ],
+				[ $this->_content->get_all_content(), $this->_store->detection()->options ]
+			);
+		}
 	}
 
 	/**
@@ -709,6 +764,15 @@ class DynamicAssets implements DependencyInterface {
 			return;
 		}
 
+		// Respect the top-level generation gate before any late detection runs.
+		if ( ! DynamicAssetsUtils::should_generate_dynamic_assets() ) {
+			return;
+		}
+
+		if ( ! DynamicAssetsUtils::should_run_detection() ) {
+			return;
+		}
+
 		// SIMPLIFICATION: If cache exists, skip all late detection.
 		// Script enqueuing will use the cached data.
 		// File generation will be skipped by generate_dynamic_assets_files() if files are not stale.
@@ -748,6 +812,31 @@ class DynamicAssets implements DependencyInterface {
 		if ( DetectFeature::has_woocommerce_module_shortcode( $content ) ) {
 			et_load_woocommerce_framework();
 		}
+	}
+
+	/**
+	 * Prepare shortcode rendering support without forcing Dynamic Assets detection.
+	 *
+	 * @since ??
+	 *
+	 * @param string $content       The post content.
+	 * @param bool   $has_shortcode Whether shortcode presence is already known.
+	 *
+	 * @return void
+	 */
+	private function _maybe_prepare_shortcode_rendering_support( string $content, bool $has_shortcode = false ): void {
+		if ( ! $has_shortcode && ! DetectFeature::get_shortcode_names( $content ) ) {
+			return;
+		}
+
+		// Add filters to get rid of random p tags.
+		add_filter( 'the_content', [ HTMLUtility::class, 'fix_builder_shortcodes' ] );
+		add_filter( 'et_builder_render_layout', [ HTMLUtility::class, 'fix_builder_shortcodes' ] );
+		add_filter( 'the_content', 'et_pb_the_content_prep_code_module_for_wpautop', 0 );
+		add_filter( 'et_builder_render_layout', 'et_pb_the_content_prep_code_module_for_wpautop', 0 );
+
+		// Check if we need to load WooCommerce framework early.
+		$this->maybe_load_early_framework( $content );
 	}
 
 	/**

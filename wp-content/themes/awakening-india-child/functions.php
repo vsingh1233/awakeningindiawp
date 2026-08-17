@@ -65,6 +65,22 @@ function awakening_india_enqueue_styles() {
 }
 add_action( 'wp_enqueue_scripts', 'awakening_india_enqueue_styles' );
 
+/**
+ * Restore mobile-menu behaviour Divi does not provide natively: a keyboard-operable,
+ * ARIA-labelled trigger and collapsible submenus, matching the React reference.
+ */
+function awakening_india_enqueue_scripts() {
+	$menu_js = get_stylesheet_directory() . '/assets/js/ai-mobile-menu.js';
+	wp_enqueue_script(
+		'awakening-india-mobile-menu',
+		get_stylesheet_directory_uri() . '/assets/js/ai-mobile-menu.js',
+		array(),
+		file_exists( $menu_js ) ? filemtime( $menu_js ) : wp_get_theme()->get( 'Version' ),
+		true
+	);
+}
+add_action( 'wp_enqueue_scripts', 'awakening_india_enqueue_scripts' );
+
 /** Add a keyboard-accessible route to the main content region. */
 function awakening_india_skip_link() {
 	echo '<a class="ai-skip-link" href="#main-content">Skip to content</a>';

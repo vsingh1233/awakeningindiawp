@@ -115,7 +115,17 @@ class AttributeUtils {
 
 				// Add to appropriate target element group.
 				// Note: These will be escaped later by HTMLUtility::render_attributes() using our AttributeUtils functions.
-				$separated_attributes[ $target_element ][ $name ] = $value;
+				// Same-name entries in one list must merge (class/style) or override (other attrs),
+				// not last-wins overwrite — see merge_attribute_values().
+				if ( isset( $separated_attributes[ $target_element ][ $name ] ) ) {
+					$separated_attributes[ $target_element ][ $name ] = self::merge_attribute_values(
+						$name,
+						$separated_attributes[ $target_element ][ $name ],
+						$value
+					);
+				} else {
+					$separated_attributes[ $target_element ][ $name ] = $value;
+				}
 			}
 		}
 

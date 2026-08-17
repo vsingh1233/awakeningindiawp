@@ -21,6 +21,7 @@ use ET\Builder\FrontEnd\BlockParser\BlockParserBlock;
 use ET\Builder\FrontEnd\BlockParser\OrderIndexResetManager;
 use ET\Builder\Framework\Utility\ArrayUtility;
 use ET\Builder\Framework\Utility\HTMLUtility;
+use ET\Builder\Packages\Conversion\Conversion;
 use ET\Builder\Packages\Module\Options\Conditions\ConditionsRenderer;
 use WP_Block;
 
@@ -1234,13 +1235,29 @@ class BlockParserStore {
 				}
 			}
 
+			// Convert D4 shortcode to D5 blocks on-the-fly when the global module template
+			// has not yet been persisted as D5 in the database. Without this, the raw D4
+			// shortcode is fed directly into parse_blocks() which cannot parse it, producing
+			// a blank render. The rest of the rendering pipeline handles D4-on-the-fly for
+			// regular page content; this makes global module templates consistent with that.
+			$raw_post_content = $post->post_content;
+			if ( false !== strpos( $raw_post_content, '[et_pb_' ) ) {
+				// initialize_shortcode_framework() is idempotent — no-op if already called.
+				Conversion::initialize_shortcode_framework();
+				// Only fire once per request; in migration contexts it was already fired upstream.
+				if ( ! did_action( 'divi_visual_builder_before_d4_conversion' ) ) {
+					do_action( 'divi_visual_builder_before_d4_conversion' );
+				}
+				$raw_post_content = Conversion::maybeConvertContent( $raw_post_content, true, (int) $post_id );
+			}
+
 			// Decode HTML entities before processing (WordPress encodes block comments in database).
 			// Use safe, whitelist-based entity decoding to prevent XSS vulnerabilities.
 			// This decodes only WordPress block structure entities (&quot;, &amp;, brackets)
 			// and does NOT decode dangerous entities like &lt; and &gt; that could enable script injection.
 			// @see: https://github.com/elegantthemes/submodule-builder-5/pull/6776#discussion_r2434267097.
 			// @see: https://github.com/elegantthemes/Divi/issues/9664.
-			$decoded_content = HTMLUtility::decode_wordpress_block_entities( $post->post_content );
+			$decoded_content = HTMLUtility::decode_wordpress_block_entities( $raw_post_content );
 			$decoded_content = self::_collapse_duplicate_placeholder_wrappers( $decoded_content );
 
 			// CRITICAL: Inject localAttrs into template content BEFORE parsing.
@@ -1436,6 +1453,17 @@ class BlockParserStore {
 	 */
 	public static function get_instance() {
 		return self::$_instance;
+	}
+
+	/**
+	 * Get all active store instance IDs.
+	 *
+	 * @since ??
+	 *
+	 * @return array<int, int>
+	 */
+	public static function get_instance_ids(): array {
+		return array_map( 'intval', array_keys( self::$_data ) );
 	}
 
 

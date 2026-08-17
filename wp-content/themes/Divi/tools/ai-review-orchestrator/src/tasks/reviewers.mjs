@@ -135,9 +135,40 @@ export const runReviewers = task(
         // No stagger needed for sequential runs.
       }
       log(`reviewer: ${reviewer.name} start`);
+      const reviewRound = Number(facts.retroReview?.review_round || 1);
+      const isLaterRound = reviewRound >= 2;
+      const maxFiles = isLaterRound
+        ? facts.config?.review_rounds?.later_pass_max_files ?? 12
+        : facts.config?.review_rounds?.first_pass_max_files ?? 24;
+      const deltaOnly =
+        true === isLaterRound &&
+        false !== facts.config?.review_rounds?.later_pass_delta_only &&
+        "review-retro-feedback" !== reviewer.name;
+      const noNewDelta = true === facts.retroReview?.same_sha_as_last_review;
+      const keepPaths = (facts.retroReview?.threads || [])
+        .filter(
+          (thread) =>
+            false === thread?.is_resolved ||
+            "open" === thread?.status ||
+            "acknowledged" === thread?.status
+        )
+        .flatMap((thread) =>
+          (thread.comments || []).map((comment) => comment.path).filter(Boolean)
+        );
       const focusedFiles = selectReviewerFiles({
         reviewer,
         summaries: facts.summaries || null,
+        maxFiles,
+        deltaPaths: facts.retroReview?.delta_paths || null,
+        keepPaths,
+        deltaOnly,
+        noNewDelta,
+        preferKeepPaths: "review-retro-feedback" === reviewer.name,
+        lowSignalGlobs: Array.isArray(
+          facts.config?.review_rounds?.low_signal_globs
+        )
+          ? facts.config.review_rounds.low_signal_globs
+          : undefined,
       });
       if (focusedFiles.length) {
         const sample = focusedFiles
@@ -145,10 +176,12 @@ export const runReviewers = task(
           .map((file) => file.path)
           .join(", ");
         log(
-          `reviewer: ${reviewer.name} focused_files=${focusedFiles.length} sample=${sample}`
+          `reviewer: ${reviewer.name} focused_files=${focusedFiles.length} round=${reviewRound} delta_only=${deltaOnly} sample=${sample}`
         );
       } else {
-        log(`reviewer: ${reviewer.name} focused_files=0`);
+        log(
+          `reviewer: ${reviewer.name} focused_files=0 round=${reviewRound} delta_only=${deltaOnly}`
+        );
       }
       const outputContract =
         "review-retro-feedback" === reviewer.name

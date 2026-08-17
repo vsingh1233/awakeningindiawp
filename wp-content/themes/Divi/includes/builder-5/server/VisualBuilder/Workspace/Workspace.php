@@ -241,6 +241,54 @@ class Workspace {
 	}
 
 	/**
+	 * Resolve preference values for the user's default Builder Settings workspace.
+	 *
+	 * Mirrors startup workspace resolution in VB (`SettingsDataCallbacks::workspaces()`).
+	 *
+	 * @since ??
+	 *
+	 * @return array
+	 */
+	public static function get_default_workspace_preferences(): array {
+		$global_preferences     = self::get_global_preferences();
+		$preferences_workspaces = self::get_preferences_workspaces();
+		$custom_preferences     = is_array( $preferences_workspaces['custom'] ?? null ) ? $preferences_workspaces['custom'] : [];
+		$default_workspace_id   = is_string( $preferences_workspaces['defaultWorkspaceId'] ?? null ) ? $preferences_workspaces['defaultWorkspaceId'] : 'global';
+
+		if (
+			'global' !== $default_workspace_id &&
+			! isset( $custom_preferences[ $default_workspace_id ] ) &&
+			! self::_is_premade_preferences_workspace_id( $default_workspace_id )
+		) {
+			$default_workspace_id = 'global';
+		}
+
+		if ( 'global' === $default_workspace_id ) {
+			return $global_preferences;
+		}
+
+		if ( is_array( $custom_preferences[ $default_workspace_id ]['settings'] ?? null ) ) {
+			return $custom_preferences[ $default_workspace_id ]['settings'];
+		}
+
+		return $global_preferences;
+	}
+
+	/**
+	 * Get interface color mode for the user's default workspace.
+	 *
+	 * @since ??
+	 *
+	 * @return string `light` or `dark`.
+	 */
+	public static function get_default_app_color_mode(): string {
+		$preferences = self::get_default_workspace_preferences();
+		$color_mode  = is_string( $preferences['appColorMode'] ?? null ) ? $preferences['appColorMode'] : 'light';
+
+		return 'dark' === $color_mode ? 'dark' : 'light';
+	}
+
+	/**
 	 * Get Builder Settings workspaces payload for current user.
 	 *
 	 * @since ??

@@ -41,6 +41,8 @@ use ET\Builder\Migration\FocusFieldsPresetMigration;
 use ET\Builder\Migration\FontCapitalizationMigration;
 use ET\Builder\Migration\FontCapitalizationPresetMigration;
 use ET\Builder\Migration\TextBodyFontWeightMigration;
+use ET\Builder\Migration\ToggleTitleTextColorMigration;
+use ET\Builder\Migration\ToggleTitleTextColorPresetMigration;
 use ET\Builder\Migration\GridOffsetRulesMigration;
 use ET\Builder\Migration\GridOffsetRulesPresetMigration;
 use ET\Builder\Migration\Utils\MigrationUtils;
@@ -573,6 +575,7 @@ class Migration {
 		$migration->register_content_migration( new FocusFieldsMigration() );
 		$migration->register_content_migration( new TextBodyFontWeightMigration() );
 		$migration->register_content_migration( new FontCapitalizationMigration() );
+		$migration->register_content_migration( new ToggleTitleTextColorMigration() );
 		$migration->register_content_migration( new GridOffsetRulesMigration() );
 
 		// Register preset migrations here.
@@ -582,6 +585,7 @@ class Migration {
 		$migration->register_presets_migration( new ImageGroupPresetMigration() );
 		$migration->register_presets_migration( new FocusFieldsPresetMigration() );
 		$migration->register_presets_migration( new FontCapitalizationPresetMigration() );
+		$migration->register_presets_migration( new ToggleTitleTextColorPresetMigration() );
 		$migration->register_presets_migration( new GridOffsetRulesPresetMigration() );
 
 		return $migration;

@@ -73,15 +73,11 @@ class SettingsDataController extends RESTController {
 		}
 
 		$theme_builder_layouts = et_theme_builder_get_template_layouts();
-		// If no layouts are resolved in current request context, bail early.
-		if ( empty( $theme_builder_layouts ) && ! $is_tb_layout_post_type ) {
-			return $resolved;
-		}
 
 		if ( empty( $theme_builder_layouts ) && 0 < $post_id ) {
 			$tb_request = \ET_Theme_Builder_Request::from_post( $post_id );
 			if ( $tb_request ) {
-				$theme_builder_layouts = et_theme_builder_get_template_layouts( $tb_request );
+				$theme_builder_layouts = et_theme_builder_get_template_layouts( $tb_request, true, false );
 			}
 		}
 

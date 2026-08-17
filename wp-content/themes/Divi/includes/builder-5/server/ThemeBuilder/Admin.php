@@ -100,7 +100,9 @@ class Admin implements DependencyInterface {
 				esc_url(
 					add_query_arg(
 						[
-							'key' => et_pb_get_google_api_key(),
+							'key'       => et_pb_get_google_api_key(),
+							'libraries' => 'marker',
+							'loading'   => 'async',
 						],
 						is_ssl() ? 'https://maps.googleapis.com/maps/api/js' : 'http://maps.googleapis.com/maps/api/js'
 					)

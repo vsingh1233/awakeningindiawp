@@ -29,13 +29,17 @@ use ET\Builder\Packages\Conversion\Conversion;
 use ET\Builder\Packages\Conversion\LegacyAttributeNames;
 use ET\Builder\Packages\GlobalData\GlobalPreset;
 use ET\Builder\Packages\GlobalLayout\GlobalLayout;
+use ET\Builder\Packages\ModuleLibrary\GravityForms\GravityFormsService;
 use ET\Builder\Packages\Module\Layout\Components\DynamicContent\DynamicContentOptions;
 use ET\Builder\Packages\Module\Layout\Components\ModuleElements\ModuleElementsUtils;
+use ET\Builder\Packages\ModuleLibrary\ImagelyGallery\ImagelyGalleryService;
 use ET\Builder\FrontEnd\BlockParser\BlockParserStore;
 use ET\Builder\Packages\ModuleUtils\ModuleUtils;
+use ET\Builder\Packages\ModuleLibrary\PostFilterItem\PostFilterProductPriceRange;
 use ET\Builder\Packages\WooCommerce\WooCommerceUtils;
 use ET\Builder\Services\EmailAccountService\EmailAccountService;
 use ET\Builder\Services\InstagramAccountService\InstagramAccountService;
+use ET\Builder\Services\PaymentAccountService\PaymentAccountService;
 use ET\Builder\Services\SpamProtectionService\SpamProtectionService;
 use ET\Builder\ThemeBuilder\Layout;
 use ET\Builder\VisualBuilder\AppPreferences\AppPreferences;
@@ -49,6 +53,7 @@ use ET\Builder\Packages\Conversion\ShortcodeMigration;
 use ET\Builder\VisualBuilder\OffCanvas\OffCanvasHooks;
 use ET\Builder\VisualBuilder\Performance\SettingsDataPerfCache;
 use ET\Builder\Packages\ModuleUtils\CanvasUtils;
+use ET\Builder\VisualBuilder\REST\Announcements\AnnouncementsController;
 
 /**
  * Class that provides Settings Data callbacks.
@@ -745,6 +750,7 @@ class SettingsDataCallbacks {
 					[
 						'post_type'      => 'wpcf7_contact_form',
 						'post_status'    => 'publish',
+						// phpcs:ignore WordPress.WP.PostsPerPage.posts_per_page_posts_per_page -- Settings data must list every available CF7 form.
 						'posts_per_page' => 500,
 						'orderby'        => 'title',
 						'order'          => 'ASC',
@@ -761,6 +767,29 @@ class SettingsDataCallbacks {
 			$return = [
 				'isActive' => $is_active,
 				'forms'    => $forms,
+			];
+		}
+
+		return $return;
+	}
+
+	/**
+	 * Gravity Forms setting data for the Visual Builder.
+	 *
+	 * @since ??
+	 *
+	 * @return array<string, mixed>
+	 */
+	public static function gravity_forms(): array {
+		static $return = null;
+
+		if ( null === $return || Conditions::is_test_env() ) {
+			$is_active = class_exists( '\GFForms' );
+			$forms     = $is_active ? GravityFormsService::get_forms_options() : [];
+
+			$return = [
+				'isActive' => $is_active,
+				'forms'    => [] === $forms ? (object) [] : $forms,
 			];
 		}
 
@@ -801,7 +830,7 @@ class SettingsDataCallbacks {
 	public static function post() {
 		static $return = null;
 
-		if ( null === $return ) {
+		if ( null === $return || Conditions::is_test_env() ) {
 			global $post;
 
 			$post_id      = isset( $post->ID ) ? absint( $post->ID ) : 0;
@@ -1353,6 +1382,38 @@ class SettingsDataCallbacks {
 	 *
 	 * @since ??
 	 *
+	 * @param array  $templates              Theme Builder template payloads keyed by layout type.
+	 * @param int    $post_id                Current layout post ID.
+	 * @param string $active_tb_layout       Active Theme Builder layout key.
+	 * @param bool   $is_tb_layout_post_type Whether the current post is a Theme Builder layout.
+	 *
+	 * @return array Theme Builder template payloads.
+	 */
+	private static function _hydrate_editing_tb_layout_template_from_post(
+		array $templates,
+		int $post_id,
+		string $active_tb_layout,
+		bool $is_tb_layout_post_type
+	): array {
+		if ( ! $is_tb_layout_post_type || $post_id <= 0 || '' === $active_tb_layout || ! isset( $templates[ $active_tb_layout ] ) ) {
+			return $templates;
+		}
+
+		$post_content_data = self::post();
+
+		$templates[ $active_tb_layout ] = [
+			'id'       => $post_id,
+			'title'    => $post_content_data['title'] ?? get_the_title( $post_id ),
+			'content'  => $post_content_data['content'] ?? '',
+			'isGlobal' => false,
+		];
+
+		return $templates;
+	}
+
+	/**
+	 * Get Theme Builder template data for a layout area.
+	 *
 	 * @param array  $theme_builder_layouts Theme Builder layouts data.
 	 * @param string $layout_post_type_key  Theme Builder layout post type key constant value.
 	 * @param string $expected_post_type    Expected layout post type.
@@ -1443,6 +1504,26 @@ class SettingsDataCallbacks {
 	}
 
 	/**
+	 * Resolve Theme Builder template layouts for the current request.
+	 *
+	 * In PHPUnit, bypass the static layout store so `et_theme_builder_template_layouts`
+	 * filters registered by tests are not skipped after post-ID reuse across the suite.
+	 *
+	 * @since ??
+	 *
+	 * @param \ET_Theme_Builder_Request|null $request Optional request context.
+	 *
+	 * @return array
+	 */
+	private static function _get_theme_builder_template_layouts( $request = null ): array {
+		if ( Conditions::is_test_env() ) {
+			return et_theme_builder_get_template_layouts( $request, false, false );
+		}
+
+		return et_theme_builder_get_template_layouts( $request );
+	}
+
+	/**
 	 * Get `themeBuilderTemplates` setting data.
 	 *
 	 * Provides Theme Builder template content (header, footer, body) for the current post.
@@ -1453,7 +1534,7 @@ class SettingsDataCallbacks {
 	public static function theme_builder_templates() {
 		static $return = null;
 
-		if ( null === $return ) {
+		if ( null === $return || Conditions::is_test_env() ) {
 			// Check if Theme Builder templates should be shown based on user preference.
 			$show_theme_builder_templates = et_get_option( 'et_fb_pref_show_theme_builder_templates', true, '', true );
 			global $post;
@@ -1543,7 +1624,7 @@ class SettingsDataCallbacks {
 			$theme_builder_data    = self::theme_builder();
 			$theme_builder_layouts = isset( $theme_builder_data['themeBuilderAreas'] ) && is_array( $theme_builder_data['themeBuilderAreas'] )
 				? $theme_builder_data['themeBuilderAreas']
-				: et_theme_builder_get_template_layouts();
+				: self::_get_theme_builder_template_layouts();
 			$active_layout_ids     = [];
 
 			foreach ( $active_template_areas as $area ) {
@@ -1574,7 +1655,14 @@ class SettingsDataCallbacks {
 			if ( empty( $active_layout_ids ) ) {
 				$post_id = isset( $post->ID ) ? $post->ID : 0;
 
-				if ( ! $is_tb_layout_post_type && is_singular() && $post_id > 0 ) {
+				if ( $is_tb_layout_post_type && $post_id > 0 ) {
+					$templates = self::_hydrate_editing_tb_layout_template_from_post(
+						$templates,
+						$post_id,
+						$active_tb_layout,
+						$is_tb_layout_post_type
+					);
+				} elseif ( ! $is_tb_layout_post_type && is_singular() && $post_id > 0 ) {
 					$post_content_data        = self::post();
 					$templates['postContent'] = [
 						'id'       => $post_id,
@@ -1682,10 +1770,12 @@ class SettingsDataCallbacks {
 			}
 
 			// Get post content (for postContent layout).
-			$post_id         = isset( $post->ID ) ? $post->ID : 0;
-			$body_layout     = $theme_builder_layouts[ ET_THEME_BUILDER_BODY_LAYOUT_POST_TYPE ] ?? [];
-			$has_body_layout = ! empty( $body_layout['override'] ) && ! empty( $body_layout['enabled'] );
-			$load_post_data  = ! $is_tb_layout_post_type && ( is_singular() || $has_body_layout );
+			// Require singular context for postContent ownership. On non-singular pages
+			// WordPress sets global $post to the first main-query loop post; hydrating
+			// postContent from that ID (even when a TB body layout exists) causes SyncToServer
+			// to treat the loop post as the editable main post (#49679 / #48529).
+			$post_id        = isset( $post->ID ) ? $post->ID : 0;
+			$load_post_data = ! $is_tb_layout_post_type && is_singular();
 
 			if ( $load_post_data && $post_id > 0 ) {
 				$post_content_data        = self::post();
@@ -1696,6 +1786,13 @@ class SettingsDataCallbacks {
 					'isGlobal' => false,
 				];
 			}
+
+			$templates = self::_hydrate_editing_tb_layout_template_from_post(
+				$templates,
+				$post_id,
+				$active_tb_layout,
+				$is_tb_layout_post_type
+			);
 
 			$templates['imageDimensionsMap'] = self::_build_image_dimensions_map_for_contents(
 				[
@@ -1767,6 +1864,30 @@ class SettingsDataCallbacks {
 	}
 
 	/**
+	 * Append payment mutation capability to each provider service payload.
+	 *
+	 * @since ??
+	 *
+	 * @param array $services Payment services payload.
+	 *
+	 * @return array
+	 */
+	private static function _append_payment_service_mutation_capability( array $services ): array {
+		$can_mutate = current_user_can( 'manage_options' );
+
+		foreach ( $services as $provider => $provider_data ) {
+			if ( ! is_array( $provider_data ) ) {
+				continue;
+			}
+
+			$provider_data['canMutate'] = $can_mutate;
+			$services[ $provider ]      = $provider_data;
+		}
+
+		return $services;
+	}
+
+	/**
 	 * Get `services` setting data.
 	 *
 	 * @since ??
@@ -1775,8 +1896,26 @@ class SettingsDataCallbacks {
 		static $return = null;
 
 		if ( null === $return || Conditions::is_test_env() ) {
+			$payment_services = [];
+
+			try {
+				$payment_services = self::_append_payment_service_mutation_capability( PaymentAccountService::definition() );
+			} catch ( \Throwable $error ) {
+				// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+				error_log(
+					sprintf(
+						'[Divi Builder 5][SettingsDataCallbacks::services] Failed to resolve payment services: %1$s in %2$s:%3$d',
+						$error->getMessage(),
+						$error->getFile(),
+						$error->getLine()
+					)
+				);
+				$payment_services = [];
+			}
+
 			$return = [
 				'email'          => EmailAccountService::definition(),
+				'payment'        => $payment_services,
 				'socialMedia'    => [
 					'instagram' => [
 						'accounts' => InstagramAccountService::definition(),
@@ -2111,7 +2250,7 @@ class SettingsDataCallbacks {
 	public static function theme_builder() {
 		static $return = null;
 
-		if ( null === $return ) {
+		if ( null === $return || Conditions::is_test_env() ) {
 			global $post;
 			$post_type = $post->post_type ?? 'post';
 
@@ -2119,7 +2258,7 @@ class SettingsDataCallbacks {
 			// TODO feat(D5, Theme Builder) Maybe remove these parameters. Check whether these are used or not.
 			// At the moment these are straight copy from Divi 4 counterpart.
 			// Validate the Theme Builder body layout and its post content module, if any.
-			$theme_builder_layouts    = et_theme_builder_get_template_layouts();
+			$theme_builder_layouts    = self::_get_theme_builder_template_layouts();
 			$has_tb_layouts           = ! empty( $theme_builder_layouts );
 			$is_tb_layout             = et_theme_builder_is_layout_post_type( $post_type );
 			$tb_body_layout           = ArrayUtility::get_value( $theme_builder_layouts, ET_THEME_BUILDER_BODY_LAYOUT_POST_TYPE, [] );
@@ -2267,6 +2406,7 @@ class SettingsDataCallbacks {
 					'et_builder_5'
 				),
 				'isWooCommerceActive'               => Conditions::is_woocommerce_enabled(),
+				'productPriceRange'                 => PostFilterProductPriceRange::get_range(),
 				'productTabsOptions'                => Conditions::is_tb_enabled() && Conditions::is_woocommerce_enabled()
 					? WooCommerceUtils::set_default_product_tabs_options()
 					: WooCommerceUtils::get_product_tabs_options(),
@@ -2362,6 +2502,41 @@ class SettingsDataCallbacks {
 	}
 
 	/**
+	 * Get Imagely (NextGEN) Gallery settings data.
+	 *
+	 * @since ??
+	 *
+	 * @return array Imagely Gallery settings.
+	 */
+	public static function imagely_gallery(): array {
+		static $return = null;
+
+		if ( null === $return || Conditions::is_test_env() ) {
+			$is_active = class_exists( 'C_NextGEN_Bootstrap' ) && ImagelyGalleryService::is_runtime_available();
+			$galleries = [];
+
+			if ( $is_active ) {
+				foreach ( ImagelyGalleryService::get_galleries() as $gallery ) {
+					$galleries[ (string) $gallery['id'] ] = [
+						'label' => sanitize_text_field( wp_strip_all_tags( (string) $gallery['title'] ) ),
+					];
+				}
+			}
+
+			if ( [] === $galleries ) {
+				$galleries = (object) [];
+			}
+
+			$return = [
+				'isActive'  => $is_active,
+				'galleries' => $galleries,
+			];
+		}
+
+		return $return;
+	}
+
+	/**
 	 * Get dependency change detection data for attrs maps cache invalidation.
 	 *
 	 * @since ??
@@ -2453,14 +2628,14 @@ class SettingsDataCallbacks {
 
 		// If app-load IDs are unavailable, resolve from current query context.
 		if ( empty( $theme_builder_layouts ) ) {
-			$theme_builder_layouts = et_theme_builder_get_template_layouts();
+			$theme_builder_layouts = self::_get_theme_builder_template_layouts();
 		}
 
 		// Last fallback: resolve by post context.
 		if ( empty( $theme_builder_layouts ) ) {
 			$tb_request = \ET_Theme_Builder_Request::from_post( $post_id );
 			if ( $tb_request ) {
-				$theme_builder_layouts = et_theme_builder_get_template_layouts( $tb_request );
+				$theme_builder_layouts = self::_get_theme_builder_template_layouts( $tb_request );
 			}
 		}
 
@@ -2576,5 +2751,25 @@ class SettingsDataCallbacks {
 		}
 
 		return $off_canvas_data;
+	}
+
+	/**
+	 * Get announcements data.
+	 *
+	 * This payload is used by the Visual Builder to render product updates instantly from the store.
+	 * Announcements are version-cached server-side and refreshed only when builder version changes.
+	 *
+	 * @since ??
+	 *
+	 * @return array<string, mixed>
+	 */
+	public static function announcements(): array {
+		static $return = null;
+
+		if ( null === $return || Conditions::is_test_env() ) {
+			$return = AnnouncementsController::get_announcements_payload_for_current_user();
+		}
+
+		return $return;
 	}
 }

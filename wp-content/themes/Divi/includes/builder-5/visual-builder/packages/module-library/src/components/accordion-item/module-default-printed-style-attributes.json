@@ -2,6 +2,13 @@
   "_comment": "!!! THIS IS AN AUTOMATICALLY GENERATED FILE - DO NOT EDIT !!!",
   "module": {
     "decoration": {
+      "layout": {
+        "desktop": {
+          "value": {
+            "flexDirection": "column"
+          }
+        }
+      },
       "position": {
         "desktop": {
           "value": {

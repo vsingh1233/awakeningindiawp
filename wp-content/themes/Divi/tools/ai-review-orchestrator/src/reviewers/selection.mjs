@@ -32,152 +32,81 @@ export const rankFilesBySize = (files) =>
     return sizeB - sizeA;
   });
 
+const normalizeFilePath = (filePath) =>
+  String(filePath || "").replace(/^(\.\/)+/, "");
+
+const pathMatchesSet = (filePath, pathSet) => {
+  const normalized = normalizeFilePath(filePath);
+  if ("" === normalized) {
+    return false;
+  }
+  if (pathSet.has(normalized)) {
+    return true;
+  }
+  for (const candidate of pathSet) {
+    if (
+      normalized.endsWith(candidate) ||
+      candidate.endsWith(normalized)
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
 export const hasPathMatch = (filePath, patterns) =>
   patterns.some((pattern) => minimatch(filePath, pattern, { dot: true }));
 
+export const DEFAULT_LOW_SIGNAL_GLOBS = [
+  "**/__snapshots__/**",
+  "**/*.snap",
+  "**/module.json",
+  "**/module-default-printed-style-attributes.json",
+  "**/module-default-render-attributes.json",
+  "**/conversion-outline.json",
+  "**/_all_modules_metadata.php",
+  "**/_all_modules_default_render_attributes.php",
+  "**/_all_modules_default_printed_style_attributes.php",
+];
+
+export const isLowSignalReviewFile = (
+  filePath,
+  patterns = DEFAULT_LOW_SIGNAL_GLOBS
+) => null != filePath && hasPathMatch(filePath, patterns);
+
 export const buildRequiredReviewers = (facts) => {
   const reviewers = new Set();
-  const sizeKey = facts.sizeKey || "medium";
   const codeFiles = Array.isArray(facts.codeFiles) ? facts.codeFiles : [];
-  const lowerTitle = String(facts.prMeta?.title || "").toLowerCase();
-  const lowerHead = String(facts.headRef || "").toLowerCase();
-
-  const baseSet =
-    "large" === sizeKey || "huge" === sizeKey
-      ? [
-          "review-change-intent",
-          "review-correctness",
-          "review-security",
-          "review-api-contract",
-          "review-error-handling",
-          "review-performance",
-        ]
-      : [
-          "review-change-intent",
-          "review-code-clarity",
-          "review-correctness",
-          "review-divi-architecture",
-          "review-performance",
-          "review-security",
-        ];
-  baseSet.forEach((name) => reviewers.add(name));
+  const hasRetroFeedback =
+    true === facts?.retroReview?.enabled &&
+    (0 < Number(facts?.retroReview?.thread_count || 0) ||
+      Number(facts?.retroReview?.review_round || 1) >= 2);
 
   const hasJsTs = codeFiles.some((filePath) =>
     hasPathMatch(filePath, ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx"])
   );
-  const hasPhp = codeFiles.some((filePath) => hasPathMatch(filePath, ["**/*.php"]));
-  const hasUiTemplates = codeFiles.some((filePath) =>
-    hasPathMatch(filePath, ["**/*.tsx", "**/*.jsx", "**/*.php", "**/*.html"])
-  );
-  const hasI18n = codeFiles.some((filePath) =>
-    hasPathMatch(filePath, ["**/i18n/**", "**/*.po", "**/*.mo"])
-  );
-  const hasApiContracts = codeFiles.some((filePath) =>
-    hasPathMatch(filePath, [
-      "**/api/**",
-      "**/rest/**",
-      "**/graphql/**",
-      "**/contracts/**",
-      "**/types/**",
-      "**/schema/**",
-    ])
-  );
-  const hasAuthSecurity = codeFiles.some((filePath) =>
-    hasPathMatch(filePath, ["**/auth/**", "**/security/**", "**/permissions/**"])
-  );
   const hasMigrations = codeFiles.some((filePath) =>
     hasPathMatch(filePath, ["**/migrations/**", "**/database/**", "**/schema/**"])
-  );
-  const hasTests = codeFiles.some((filePath) =>
-    hasPathMatch(filePath, ["**/__tests__/**", "**/*.spec.*", "**/*.test.*"])
-  );
-  const hasDeps = codeFiles.some((filePath) =>
-    hasPathMatch(filePath, [
-      "**/package.json",
-      "**/yarn.lock",
-      "**/package-lock.json",
-      "**/pnpm-lock.yaml",
-      "**/composer.json",
-      "**/composer.lock",
-    ])
-  );
-  const hasDiviArchitectureSignals = codeFiles.some((filePath) =>
-    /(conversion-outline|module\.json-source|\/conversion\/|\/module-library\/|global-data|GlobalData|\bd4\b|\bd5\b)/i.test(
-      filePath
-    )
   );
   const hasAttrIntegritySignals = codeFiles.some((filePath) =>
     /(attrs|attrs-map|attrsmap|attr-map|attrmap|group-preset|grouppreset|renderattrs|styleattrs|dynamicoptiongroups|clipboard|right-click-options|modal-library|update-attribute|parse-serialized|serialize|module-utils|module-library)/i.test(
       filePath
     )
   );
-  const hasSpecs = codeFiles.some((filePath) =>
-    hasPathMatch(filePath, ["includes/builder-5/specs/**"])
-  );
-  const hasSpecMap = codeFiles.some((filePath) =>
-    hasPathMatch(filePath, [
-      "includes/builder-5/specs/**/spec-map.*",
-      "includes/builder-5/specs/spec-map.*",
-    ])
-  );
-  const hasBugfixSignal =
-    /(fix|bug|hotfix|patch|regression)/i.test(lowerTitle) ||
-    /(fix|bug|hotfix|patch|regression)/i.test(lowerHead);
-  const hasRetroFeedback =
-    true === facts?.retroReview?.enabled &&
-    0 < Number(facts?.retroReview?.thread_count || 0);
+
+  [
+    "review-change-quality",
+    "review-architecture-specs",
+    "review-security",
+    "review-performance",
+    "review-test-quality",
+  ].forEach((name) => reviewers.add(name));
 
   if (hasJsTs) {
-    reviewers.add("review-type-quality");
-    reviewers.add("review-types-structure");
-    reviewers.add("review-performance");
-    reviewers.add("review-ux-accessibility");
+    reviewers.add("review-types");
   }
-  if (hasPhp) {
-    reviewers.add("review-error-handling");
-    reviewers.add("review-security");
-    reviewers.add("review-performance");
-  }
-  if (hasUiTemplates) {
-    reviewers.add("review-ux-accessibility");
-    reviewers.add("review-i18n");
-  }
-  if (hasI18n) {
-    reviewers.add("review-i18n");
-  }
-  if (hasApiContracts) {
-    reviewers.add("review-api-contract");
-  }
-  if (hasAuthSecurity) {
-    reviewers.add("review-security");
-  }
-  if (hasMigrations) {
-    reviewers.add("review-rollout-migration");
-    reviewers.add("review-api-contract");
-    reviewers.add("review-data-persistence");
-  }
-  if (hasAttrIntegritySignals) {
-    reviewers.add("review-data-persistence");
-    reviewers.add("review-bugfix-validation");
-    reviewers.add("review-divi-architecture");
-  }
-  if (hasTests) {
-    reviewers.add("review-test-quality");
-  }
-  if (hasDeps) {
-    reviewers.add("review-dependencies");
-  }
-  if (hasDiviArchitectureSignals) {
-    reviewers.add("review-divi-architecture");
-  }
-  if (hasSpecs) {
-    reviewers.add("review-spec-alignment");
-  }
-  if (hasSpecMap) {
-    reviewers.add("review-spec-map");
-  }
-  if (hasBugfixSignal) {
-    reviewers.add("review-bugfix-validation");
+  if (hasMigrations || hasAttrIntegritySignals) {
+    reviewers.add("review-data-lifecycle");
   }
   if (hasRetroFeedback) {
     reviewers.add("review-retro-feedback");
@@ -186,15 +115,44 @@ export const buildRequiredReviewers = (facts) => {
   return reviewers;
 };
 
-export const selectReviewerFiles = ({ reviewer, summaries, maxFiles = 12 }) => {
+export const selectReviewerFiles = ({
+  reviewer,
+  summaries,
+  maxFiles = 12,
+  deltaPaths = null,
+  keepPaths = null,
+  deltaOnly = false,
+  noNewDelta = false,
+  preferKeepPaths = false,
+  lowSignalGlobs = DEFAULT_LOW_SIGNAL_GLOBS,
+}) => {
   const files = summaries?.files || [];
   if (0 === files.length) {
     return [];
+  }
+  if (true === deltaOnly && true === noNewDelta && false === preferKeepPaths) {
+    return [];
+  }
+  const excludeLowSignal = (file) =>
+    false === isLowSignalReviewFile(file.path, lowSignalGlobs);
+  if (true === preferKeepPaths && Array.isArray(keepPaths) && 0 < keepPaths.length) {
+    const keepSet = new Set(
+      keepPaths.map((filePath) => normalizeFilePath(filePath)).filter(Boolean)
+    );
+    const kept = rankFilesBySize(
+      files.filter((file) => pathMatchesSet(file.path, keepSet))
+    );
+    if (0 < kept.length) {
+      return kept.slice(0, maxFiles);
+    }
   }
   const lowerKeywords = (reviewer.keywords || []).map((keyword) =>
     keyword.toLowerCase()
   );
   const matched = files.filter((file) => {
+    if (false === excludeLowSignal(file)) {
+      return false;
+    }
     const pathMatch = (reviewer.globs || []).some((glob) =>
       minimatch(file.path, glob, { dot: true })
     );
@@ -208,10 +166,33 @@ export const selectReviewerFiles = ({ reviewer, summaries, maxFiles = 12 }) => {
     return lowerKeywords.some((keyword) => haystack.includes(keyword));
   });
   const ranked = rankFilesBySize(matched);
-  if (0 < ranked.length) {
-    return ranked.slice(0, maxFiles);
+  const restrictToDelta =
+    true === deltaOnly && Array.isArray(deltaPaths) && 0 < deltaPaths.length;
+  let selected = ranked;
+  if (true === restrictToDelta) {
+    const deltaSet = new Set(
+      deltaPaths.map((filePath) => normalizeFilePath(filePath)).filter(Boolean)
+    );
+    const keepSet = new Set(
+      (keepPaths || [])
+        .map((filePath) => normalizeFilePath(filePath))
+        .filter(Boolean)
+    );
+    selected = ranked.filter(
+      (file) =>
+        pathMatchesSet(file.path, deltaSet) || pathMatchesSet(file.path, keepSet)
+    );
   }
-  return rankFilesBySize(files).slice(0, Math.min(maxFiles, 5));
+  if (0 < selected.length) {
+    return selected.slice(0, maxFiles);
+  }
+  if (true === restrictToDelta) {
+    return [];
+  }
+  return rankFilesBySize(files.filter(excludeLowSignal)).slice(
+    0,
+    Math.min(maxFiles, 5)
+  );
 };
 
 export const resolveReviewerRuns = ({ reviewer, sizeKey, config }) => {

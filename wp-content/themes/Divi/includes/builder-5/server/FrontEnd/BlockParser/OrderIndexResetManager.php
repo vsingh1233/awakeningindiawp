@@ -399,19 +399,21 @@ class OrderIndexResetManager {
 							unset( self::$_reset_contexts[ $context_key ] );
 						}
 					}
-				} elseif ( $already_reset_for_new_instance ) {
-					// PHASE_BEFORE_RENDERING hasn't run - use original logic (check current instance only).
-					// This ensures multiple do_blocks() calls continue sequentially.
-					// Only check if we've already reset (to avoid unnecessary expensive check).
-					// Cache expensive block check.
-					$cache_key_current = "has_blocks_current:{$current_layout_type}";
-					if ( ! isset( self::$_blocks_check_cache[ $cache_key_current ] ) ) {
-						self::$_blocks_check_cache[ $cache_key_current ] = BlockParserStore::has_blocks_for_layout_type( $current_layout_type );
+				} else {
+					// PHASE_BEFORE_RENDERING hasn't run - restore the original multi-do_blocks contract
+					// from OrderIndexResetManager introduction (1de4d033): if any store instance already
+					// has parsed blocks, skip reset so consecutive do_blocks() calls continue sequentially.
+					//
+					// IMPORTANT: Check across instances via has_parsed_blocks(), not the current instance.
+					// new_instance() switches $_instance to the new empty store before maybe_reset() runs,
+					// so has_blocks_for_layout_type() on the current instance would always be false here.
+					$cache_key_parsed = "has_parsed_blocks_globally:{$current_layout_type}";
+					if ( ! isset( self::$_blocks_check_cache[ $cache_key_parsed ] ) ) {
+						self::$_blocks_check_cache[ $cache_key_parsed ] = BlockParserStore::has_parsed_blocks();
 					}
-					$has_blocks_in_current_instance = self::$_blocks_check_cache[ $cache_key_current ];
-					if ( $has_blocks_in_current_instance ) {
-						// Remove the context so we can reset again.
-						unset( self::$_reset_contexts[ $context_key ] );
+					if ( self::$_blocks_check_cache[ $cache_key_parsed ] ) {
+						self::$_reset_contexts[ $context_key ] = true;
+						return false;
 					}
 				}
 			}
@@ -442,10 +444,11 @@ class OrderIndexResetManager {
 	}
 
 	/**
-	 * Initialize global canvas tracking at the start of a new page render.
+	 * Initialize page-wide off-canvas tracking for the current HTTP request.
 	 *
-	 * This should be called early in the rendering pipeline to ensure
-	 * each page load starts fresh.
+	 * Called from reset_order_index_before_rendering() on each et_builder_render_layout
+	 * pass, so arrays are initialized only when absent — not cleared mid-request.
+	 * PHP resets $GLOBALS on each HTTP request; tests unset these keys between cases.
 	 *
 	 * @since ??
 	 *
@@ -454,6 +457,10 @@ class OrderIndexResetManager {
 	public static function init_page_render() {
 		if ( ! isset( $GLOBALS['divi_off_canvas_global_rendered'] ) ) {
 			$GLOBALS['divi_off_canvas_global_rendered'] = [];
+		}
+
+		if ( ! isset( $GLOBALS['divi_off_canvas_injected_canvas_ids'] ) ) {
+			$GLOBALS['divi_off_canvas_injected_canvas_ids'] = [];
 		}
 	}
 

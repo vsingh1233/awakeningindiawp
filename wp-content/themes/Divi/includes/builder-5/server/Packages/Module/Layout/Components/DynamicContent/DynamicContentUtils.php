@@ -561,6 +561,55 @@ class DynamicContentUtils {
 	}
 
 	/**
+	 * Parse a dynamic content upload sub-field setting value.
+	 *
+	 * Upload sub-fields store a JSON-encoded attachment object (`src`, `id`, `alt`) as a string.
+	 *
+	 * @since ??
+	 *
+	 * @param string $setting Sanitized upload sub-field setting value.
+	 *
+	 * @return array {
+	 *     Parsed upload field data.
+	 *
+	 *     @type string $src Attachment URL.
+	 *     @type int    $id  Attachment ID when available.
+	 *     @type string $alt Alt text.
+	 * }
+	 */
+	public static function parse_upload_field_setting( string $setting ): array {
+		$empty = [
+			'src' => '',
+			'id'  => 0,
+			'alt' => '',
+		];
+
+		$setting = trim( $setting );
+
+		if ( '' === $setting ) {
+			return $empty;
+		}
+
+		$decoded = json_decode( $setting, true );
+
+		if ( ! is_array( $decoded ) ) {
+			// Some saved settings may contain slashed JSON from WordPress serialization.
+			// Only unslash after normal decoding fails so escaped quotes in valid JSON stay intact.
+			$decoded = json_decode( wp_unslash( $setting ), true );
+		}
+
+		if ( is_array( $decoded ) && isset( $decoded['src'] ) && is_string( $decoded['src'] ) && '' !== $decoded['src'] ) {
+			return [
+				'src' => esc_url_raw( $decoded['src'] ),
+				'id'  => isset( $decoded['id'] ) ? absint( $decoded['id'] ) : 0,
+				'alt' => isset( $decoded['alt'] ) && is_string( $decoded['alt'] ) ? esc_attr( $decoded['alt'] ) : '',
+			];
+		}
+
+		return $empty;
+	}
+
+	/**
 	 * Resolve the loop post ID for a module from its own attrs and, when absent, from ancestor blocks.
 	 *
 	 * When the loop is configured on a parent block (e.g. column), the child module's own

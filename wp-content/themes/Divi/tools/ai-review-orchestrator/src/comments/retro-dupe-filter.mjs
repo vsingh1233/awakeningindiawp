@@ -67,6 +67,69 @@ const applyExactDuplicateFilter = ({ retroReview, findings }) => {
   };
 };
 
+const applyLaterRoundDeltaFilter = ({ retroReview, findings }) => {
+  const round = Number(retroReview?.review_round || 1);
+  if (round < 2) {
+    return { filtered: findings || [], dropped: [] };
+  }
+  const keepRetro = (finding) => "review-retro-feedback" === String(finding?.reviewer || "");
+  if (true === retroReview?.same_sha_as_last_review) {
+    const dropped = [];
+    const filtered = [];
+    (findings || []).forEach((finding) => {
+      if (true === keepRetro(finding)) {
+        filtered.push(finding);
+        return;
+      }
+      dropped.push(finding);
+    });
+    return { filtered, dropped };
+  }
+  const deltaPaths = Array.isArray(retroReview?.delta_paths)
+    ? retroReview.delta_paths
+    : [];
+  if (0 === deltaPaths.length) {
+    return { filtered: findings || [], dropped: [] };
+  }
+  const deltaSet = new Set(
+    deltaPaths.map((filePath) => String(filePath || "").replace(/^(\.\/)+/, ""))
+  );
+  const dropped = [];
+  const filtered = [];
+  findings.forEach((finding) => {
+    const reviewer = String(finding?.reviewer || "");
+    if ("review-retro-feedback" === reviewer) {
+      filtered.push(finding);
+      return;
+    }
+    const locations = Array.isArray(finding?.locations) ? finding.locations : [];
+    const inDelta = locations.some((location) => {
+      const locationPath = String(location?.path || "").replace(/^(\.\/)+/, "");
+      if ("" === locationPath) {
+        return false;
+      }
+      if (deltaSet.has(locationPath)) {
+        return true;
+      }
+      for (const deltaPath of deltaSet) {
+        if (
+          locationPath.endsWith(deltaPath) ||
+          deltaPath.endsWith(locationPath)
+        ) {
+          return true;
+        }
+      }
+      return false;
+    });
+    if (true === inDelta) {
+      filtered.push(finding);
+      return;
+    }
+    dropped.push(finding);
+  });
+  return { filtered, dropped };
+};
+
 const buildRetroDupePrompt = ({ retroReview, findings }) => [
   {
     role: "system",
@@ -118,9 +181,19 @@ export const applyRetroDupeFilter = async ({ facts, findings }) => {
     return { filtered: findings || [], dropped: [], report: null };
   }
   const baseline = applyExactDuplicateFilter({ retroReview, findings });
-  const baselineReport = baseline.report
-    ? { ...baseline.report, dropped_count: baseline.dropped.length }
-    : null;
+  const deltaFilter = applyLaterRoundDeltaFilter({
+    retroReview,
+    findings: baseline.filtered,
+  });
+  const preDropped = [...baseline.dropped, ...deltaFilter.dropped];
+  const baselineReport = {
+    exact_duplicate: baseline.report
+      ? { ...baseline.report, dropped_count: baseline.dropped.length }
+      : null,
+    later_round_outside_delta: {
+      dropped_count: deltaFilter.dropped.length,
+    },
+  };
   if (baseline.dropped.length > 0) {
     log(
       `[retro-dupe] exact dedupe dropped ${baseline.dropped.length} finding${
@@ -128,17 +201,24 @@ export const applyRetroDupeFilter = async ({ facts, findings }) => {
       }.`
     );
   }
+  if (deltaFilter.dropped.length > 0) {
+    log(
+      `[retro-dupe] later-round delta filter dropped ${deltaFilter.dropped.length} finding${
+        deltaFilter.dropped.length === 1 ? "" : "s"
+      }.`
+    );
+  }
   const apiKey = process.env.OPENAI_API_KEY;
   if (null == apiKey || "" === String(apiKey).trim()) {
     log("[retro-dupe] warning: OPENAI_API_KEY missing; skipping retro dupe filter.");
     return {
-      filtered: baseline.filtered,
-      dropped: baseline.dropped,
+      filtered: deltaFilter.filtered,
+      dropped: preDropped,
       report: baselineReport,
     };
   }
   const client = new OpenAI({ apiKey });
-  const indexed = baseline.filtered.map((finding, index) => ({
+  const indexed = deltaFilter.filtered.map((finding, index) => ({
     id: `finding_${index + 1}`,
     finding,
   }));
@@ -193,8 +273,8 @@ export const applyRetroDupeFilter = async ({ facts, findings }) => {
       : [];
     if (0 === drops.length) {
       return {
-        filtered: baseline.filtered,
-        dropped: baseline.dropped,
+        filtered: deltaFilter.filtered,
+        dropped: preDropped,
         report: baselineReport,
       };
     }
@@ -205,7 +285,7 @@ export const applyRetroDupeFilter = async ({ facts, findings }) => {
     const modelDropped = indexed
       .filter(({ id }) => true === dropSet.has(id))
       .map(({ finding }) => finding);
-    const dropped = [...baseline.dropped, ...modelDropped];
+    const dropped = [...preDropped, ...modelDropped];
     const report = {
       prefilter: baselineReport,
       model: {
@@ -214,15 +294,15 @@ export const applyRetroDupeFilter = async ({ facts, findings }) => {
       },
     };
     log(
-      `[retro-dupe] dropped ${dropped.length} duplicate findings (${modelDropped.length} model, ${baseline.dropped.length} exact).`
+      `[retro-dupe] dropped ${dropped.length} duplicate findings (${modelDropped.length} model, ${preDropped.length} prefilter).`
     );
     return { filtered, dropped, report };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log(`[retro-dupe] warning: failed to apply retro dupe filter. ${message}`);
     return {
-      filtered: baseline.filtered,
-      dropped: baseline.dropped,
+      filtered: deltaFilter.filtered,
+      dropped: preDropped,
       report: baselineReport,
     };
   }

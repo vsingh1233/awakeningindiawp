@@ -87,6 +87,20 @@ class EnqueueState {
 	public bool $video_overlay = false;
 
 	/**
+	 * Whether video lazy load script should be enqueued.
+	 *
+	 * @var bool
+	 */
+	public bool $video_lazy_load = false;
+
+	/**
+	 * Whether map lazy load script should be enqueued.
+	 *
+	 * @var bool
+	 */
+	public bool $map_lazy_load = false;
+
+	/**
 	 * Whether search script should be enqueued.
 	 *
 	 * @var bool
@@ -248,11 +262,32 @@ class EnqueueState {
 	public bool $number_counter = false;
 
 	/**
+	 * Whether charts script should be enqueued.
+	 *
+	 * @var bool
+	 */
+	public bool $charts = false;
+
+	/**
 	 * Whether contact form script should be enqueued.
 	 *
 	 * @var bool
 	 */
 	public bool $contact_form = false;
+
+	/**
+	 * Whether post filter item script should be enqueued.
+	 *
+	 * @var bool
+	 */
+	public bool $post_filter_item = false;
+
+	/**
+	 * Whether post filter script should be enqueued.
+	 *
+	 * @var bool
+	 */
+	public bool $post_filter = false;
 
 	/**
 	 * Whether dropdown script should be enqueued.

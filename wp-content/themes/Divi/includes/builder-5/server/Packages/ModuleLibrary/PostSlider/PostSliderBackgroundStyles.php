@@ -13,6 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 use ET\Builder\Framework\Breakpoint\Breakpoint;
+use ET\Builder\Packages\Module\Layout\Components\ModuleElements\ModuleElements;
 use ET\Builder\Packages\Module\Layout\Components\Style\Utils\Utils as StyleUtils;
 use ET\Builder\Packages\ModuleUtils\ModuleUtils;
 use ET\Builder\Packages\StyleLibrary\Declarations\Declarations;
@@ -61,6 +62,105 @@ class PostSliderBackgroundStyles {
 		}
 
 		return $background_attrs;
+	}
+
+	/**
+	 * Get slide-level parallax payload.
+	 *
+	 * @param array  $background_attrs Background attributes.
+	 * @param array  $enabled_attr     Image enabled attribute values.
+	 * @param string $image_placement  Image placement setting.
+	 * @param string $slide_image      Slide background image URL.
+	 *
+	 * @return array
+	 */
+	public static function get_slide_parallax_data(
+		array $background_attrs,
+		array $enabled_attr,
+		string $image_placement,
+		string $slide_image
+	): array {
+		$parallax_data = [
+			'background_attrs'    => [],
+			'is_parallax_enabled' => false,
+		];
+
+		if ( 'background' !== $image_placement || empty( $slide_image ) ) {
+			return $parallax_data;
+		}
+
+		// Resolve parallax status from the module-level attrs before building slide-specific
+		// attrs. The parallax flag is module-level and does not require slide URL merging to detect,
+		// so an early return here avoids a redundant build_slide_background_attrs() call per slide
+		// when parallax is disabled.
+		$module_attr_value = ModuleUtils::use_attr_value(
+			[
+				'attr'         => $background_attrs,
+				'breakpoint'   => 'desktop',
+				'state'        => 'value',
+				'mode'         => 'getAndInheritAll',
+				'defaultValue' => [],
+			]
+		);
+
+		if ( 'on' !== ( $module_attr_value['image']['parallax']['enabled'] ?? 'off' ) ) {
+			return $parallax_data;
+		}
+
+		$slide_background_attrs = self::build_slide_background_attrs( $background_attrs, $enabled_attr, $slide_image );
+
+		return [
+			'background_attrs'    => $slide_background_attrs,
+			'is_parallax_enabled' => true,
+		];
+	}
+
+	/**
+	 * Render slide-level parallax background component and script data.
+	 *
+	 * @param ModuleElements $elements               Module elements instance.
+	 * @param string         $module_id              Module block ID.
+	 * @param int            $post_id                Slide post ID.
+	 * @param array          $slide_background_attrs Slide background attrs.
+	 *
+	 * @return string
+	 */
+	public static function get_slide_parallax_component(
+		ModuleElements $elements,
+		string $module_id,
+		int $post_id,
+		array $slide_background_attrs
+	): string {
+		$slide_component_id = sprintf( '%s-post-slide-%d', $module_id, $post_id );
+		$component          = $elements->style_components(
+			[
+				'attrName'             => 'module',
+				'trackUsage'           => false,
+				'styleComponentsProps' => [
+					'id'       => $slide_component_id,
+					'attrs'    => [
+						'background' => $slide_background_attrs,
+					],
+					'boxShadow' => false,
+				],
+			]
+		);
+
+		$elements->script_data(
+			[
+				'attrName'        => 'module',
+				'scriptDataProps' => [
+					'id' => $slide_component_id,
+				],
+				'attrsResolver'   => function () use ( $slide_background_attrs ) {
+					return [
+						'background' => $slide_background_attrs,
+					];
+				},
+			]
+		);
+
+		return is_string( $component ) ? $component : '';
 	}
 
 	/**

@@ -44,6 +44,316 @@ class LoopUtils {
 	const CURRENT_PAGE_DEFAULT_PER_PAGE = 10;
 
 	/**
+	 * Loop id to post type map populated during loop preprocessing.
+	 *
+	 * @var array<string, string>
+	 */
+	private static $_loop_target_post_types = [];
+
+	/**
+	 * Loop id to order-by context map populated during loop preprocessing.
+	 *
+	 * @var array<string, array{query_type: string, post_type: string, taxonomy: string}>
+	 */
+	private static $_loop_order_by_contexts = [];
+
+	/**
+	 * Loop id to include/exclude term group attrs populated during loop preprocessing.
+	 *
+	 * @var array<string, array{include: array, exclude: array}>
+	 */
+	private static $_loop_term_restriction_attrs = [];
+
+	/**
+	 * Register the target post type for a loop id.
+	 *
+	 * Populated during loop preprocessing so modules that render before the loop
+	 * module enters BlockParserStore can still resolve the effective post type.
+	 *
+	 * @since ??
+	 *
+	 * @param string $loop_id   Loop id.
+	 * @param string $post_type Post type slug.
+	 *
+	 * @return void
+	 */
+	public static function register_loop_target_post_type( string $loop_id, string $post_type ): void {
+		$loop_id   = trim( $loop_id );
+		$post_type = sanitize_key( $post_type );
+
+		if ( '' === $loop_id || '' === $post_type ) {
+			return;
+		}
+
+		self::$_loop_target_post_types[ $loop_id ] = $post_type;
+	}
+
+	/**
+	 * Get a pre-registered target post type for a loop id.
+	 *
+	 * @since ??
+	 *
+	 * @param string $loop_id Loop id.
+	 *
+	 * @return string Post type slug or empty string.
+	 */
+	public static function get_registered_loop_target_post_type( string $loop_id ): string {
+		$loop_id = trim( $loop_id );
+
+		return self::$_loop_target_post_types[ $loop_id ] ?? '';
+	}
+
+	/**
+	 * Reset the loop target post type registry.
+	 *
+	 * @since ??
+	 *
+	 * @return void
+	 */
+	public static function reset_loop_target_post_type_registry(): void {
+		self::$_loop_target_post_types = [];
+	}
+
+	/**
+	 * Register order-by context for a loop id.
+	 *
+	 * Populated during loop preprocessing so modules that render before the loop
+	 * module enters BlockParserStore can still resolve terms/user/menu order-by options.
+	 *
+	 * @since ??
+	 *
+	 * @param string $loop_id    Loop id.
+	 * @param string $query_type Loop query type slug.
+	 * @param string $taxonomy   Taxonomy slug for terms loops.
+	 * @param string $post_type  Post type slug for post-type loops.
+	 *
+	 * @return void
+	 */
+	public static function register_loop_order_by_context(
+		string $loop_id,
+		string $query_type,
+		string $taxonomy = '',
+		string $post_type = ''
+	): void {
+		$loop_id = trim( $loop_id );
+
+		if ( '' === $loop_id || '' === $query_type ) {
+			return;
+		}
+
+		self::$_loop_order_by_contexts[ $loop_id ] = [
+			'query_type' => sanitize_key( $query_type ),
+			'post_type'  => sanitize_key( $post_type ),
+			'taxonomy'   => sanitize_key( $taxonomy ),
+		];
+	}
+
+	/**
+	 * Get a pre-registered order-by context for a loop id.
+	 *
+	 * @since ??
+	 *
+	 * @param string $loop_id Loop id.
+	 *
+	 * @return array{query_type: string, post_type: string, taxonomy: string}
+	 */
+	public static function get_registered_loop_order_by_context( string $loop_id ): array {
+		$loop_id = trim( $loop_id );
+
+		return self::$_loop_order_by_contexts[ $loop_id ] ?? [];
+	}
+
+	/**
+	 * Reset the loop order-by context registry.
+	 *
+	 * @since ??
+	 *
+	 * @return void
+	 */
+	public static function reset_loop_order_by_context_registry(): void {
+		self::$_loop_order_by_contexts = [];
+	}
+
+	/**
+	 * Register include/exclude term group attrs for a loop id.
+	 *
+	 * Populated during loop preprocessing so modules that render before the loop
+	 * module enters BlockParserStore can still resolve taxonomy list restrictions.
+	 *
+	 * @since ??
+	 *
+	 * @param string $loop_id       Loop id.
+	 * @param array  $include_terms Include term group attrs.
+	 * @param array  $exclude_terms Exclude term group attrs.
+	 *
+	 * @return void
+	 */
+	public static function register_loop_term_restriction_attrs(
+		string $loop_id,
+		array $include_terms,
+		array $exclude_terms
+	): void {
+		$loop_id = trim( $loop_id );
+
+		if ( '' === $loop_id ) {
+			return;
+		}
+
+		self::$_loop_term_restriction_attrs[ $loop_id ] = [
+			'include' => $include_terms,
+			'exclude' => $exclude_terms,
+		];
+	}
+
+	/**
+	 * Get pre-registered include/exclude term group attrs for a loop id.
+	 *
+	 * @since ??
+	 *
+	 * @param string $loop_id Loop id.
+	 *
+	 * @return array{include: array, exclude: array}
+	 */
+	public static function get_registered_loop_term_restriction_attrs( string $loop_id ): array {
+		$loop_id = trim( $loop_id );
+
+		return self::$_loop_term_restriction_attrs[ $loop_id ] ?? [
+			'include' => [],
+			'exclude' => [],
+		];
+	}
+
+	/**
+	 * Reset the loop term restriction attrs registry.
+	 *
+	 * @since ??
+	 *
+	 * @return void
+	 */
+	public static function reset_loop_term_restriction_attrs_registry(): void {
+		self::$_loop_term_restriction_attrs = [];
+	}
+
+	/**
+	 * Resolve order-by list-item context from a loop id.
+	 *
+	 * @since ??
+	 *
+	 * @param string   $target_loop_id Target loop id.
+	 * @param int|null $store_instance Optional block parser store instance.
+	 *
+	 * @return array{query_type: string, post_type: string, taxonomy: string}
+	 */
+	public static function resolve_loop_order_by_context_from_loop_id( string $target_loop_id, $store_instance = null ): array {
+		$target_loop_id = trim( $target_loop_id );
+		$default_context = [
+			'query_type' => 'post_types',
+			'post_type'  => 'post',
+			'taxonomy'   => '',
+		];
+
+		if ( '' === $target_loop_id ) {
+			return $default_context;
+		}
+
+		$module = self::find_module_by_loop_id( $target_loop_id, $store_instance );
+
+		if ( null !== $module ) {
+			return self::_resolve_order_by_context_from_loop_attrs( $module->attrs );
+		}
+
+		$registered_context = self::get_registered_loop_order_by_context( $target_loop_id );
+
+		if ( ! empty( $registered_context ) ) {
+			return array_merge( $default_context, $registered_context );
+		}
+
+		$post_type = self::resolve_target_post_type_from_loop_id( $target_loop_id, $store_instance );
+
+		return [
+			'query_type' => 'post_types',
+			'post_type'  => '' !== $post_type ? $post_type : 'post',
+			'taxonomy'   => '',
+		];
+	}
+
+	/**
+	 * Register frontend hooks for loop target post type pre-registration.
+	 *
+	 * @since ??
+	 *
+	 * @return void
+	 */
+	public static function register_hooks(): void {
+		add_filter( 'the_content', [ self::class, 'pre_register_loop_target_post_types_from_content' ], 8 );
+		add_filter( 'et_builder_render_layout', [ self::class, 'pre_register_loop_target_post_types_from_content' ], 8 );
+	}
+
+	/**
+	 * Pre-register loop target post types before block rendering begins.
+	 *
+	 * Front-end layout rendering uses `do_blocks()`, which walks blocks in document order.
+	 * Modules such as post-filter-item can render before a sibling loop module enters
+	 * BlockParserStore, so loop post types must be discovered from the full document first.
+	 *
+	 * @since ??
+	 *
+	 * @param string $content Layout content.
+	 *
+	 * @return string Unmodified layout content.
+	 */
+	public static function pre_register_loop_target_post_types_from_content( string $content ): string {
+		if ( isset( $GLOBALS['divi_generating_excerpt'] ) && $GLOBALS['divi_generating_excerpt'] ) {
+			return $content;
+		}
+
+		if ( ! self::has_any_loop_enabled_blocks( $content ) ) {
+			return $content;
+		}
+
+		$wordpress_block_parser = new WP_Block_Parser();
+		$parsed_blocks          = $wordpress_block_parser->parse( $content );
+
+		if ( ! empty( $parsed_blocks ) ) {
+			self::_register_loop_target_post_types_from_blocks( $parsed_blocks );
+		}
+
+		return $content;
+	}
+
+	/**
+	 * Recursively register loop target post types from parsed blocks.
+	 *
+	 * @since ??
+	 *
+	 * @param array $blocks Parsed blocks.
+	 *
+	 * @return void
+	 */
+	private static function _register_loop_target_post_types_from_blocks( array $blocks ): void {
+		foreach ( $blocks as $block ) {
+			if ( empty( $block ) ) {
+				continue;
+			}
+
+			if ( self::_is_block_loop_enabled( $block ) ) {
+				$loop_id = $block['attrs']['module']['advanced']['loop']['desktop']['value']['loopId'] ?? '';
+
+				if ( is_string( $loop_id ) && '' !== trim( $loop_id ) ) {
+					$loop_data = self::get_query_args_from_attrs( $block['attrs'] ?? [] );
+					self::_register_loop_target_post_type_from_loop_data( trim( $loop_id ), $loop_data );
+					self::_register_loop_order_by_context_from_loop_data( trim( $loop_id ), $loop_data );
+					self::_register_loop_term_restriction_attrs_from_block_attrs( trim( $loop_id ), $block['attrs'] ?? [] );
+				}
+			}
+
+			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
+				self::_register_loop_target_post_types_from_blocks( $block['innerBlocks'] );
+			}
+		}
+	}
+
+	/**
 	 * Find module by loop ID in BlockParserStore.
 	 *
 	 * This function searches through all modules in the BlockParserStore to find
@@ -62,25 +372,239 @@ class LoopUtils {
 			return null;
 		}
 
-		$all_modules = BlockParserStore::get_all( $store_instance );
+		$instance_ids = BlockParserStore::get_instance_ids();
 
-		if ( empty( $all_modules ) ) {
+		if ( empty( $instance_ids ) ) {
 			return null;
 		}
 
-		foreach ( $all_modules as $module ) {
-			$module_loop_id = $module->attrs['module']['advanced']['loop']['desktop']['value']['loopId'] ?? null;
+		$preferred_instance = BlockParserStore::has_instance( $store_instance ) ? (int) $store_instance : BlockParserStore::get_instance();
 
-			if ( ! $module_loop_id ) {
+		if ( null !== $preferred_instance ) {
+			array_unshift( $instance_ids, $preferred_instance );
+			$instance_ids = array_values( array_unique( $instance_ids ) );
+		}
+
+		foreach ( $instance_ids as $instance_id ) {
+			$all_modules = BlockParserStore::get_all( $instance_id );
+
+			if ( empty( $all_modules ) ) {
 				continue;
 			}
 
-			if ( $target_loop_id === $module_loop_id ) {
-				return $module;
+			foreach ( $all_modules as $module ) {
+				$module_loop_id = $module->attrs['module']['advanced']['loop']['desktop']['value']['loopId'] ?? null;
+
+				if ( ! $module_loop_id ) {
+					continue;
+				}
+
+				if ( $target_loop_id === $module_loop_id ) {
+					return $module;
+				}
 			}
 		}
 
 		return null;
+	}
+
+	/**
+	 * Resolve effective post type slug from a loop id.
+	 *
+	 * @since ??
+	 *
+	 * @param string   $target_loop_id Target loop id.
+	 * @param int|null $store_instance Optional block parser store instance.
+	 *
+	 * @return string Post type slug or empty string when not applicable.
+	 */
+	public static function resolve_target_post_type_from_loop_id( string $target_loop_id, $store_instance = null ): string {
+		$target_loop_id = trim( $target_loop_id );
+
+		if ( '' === $target_loop_id ) {
+			return '';
+		}
+
+		$module = self::find_module_by_loop_id( $target_loop_id, $store_instance );
+
+		if ( null !== $module ) {
+			$resolved_post_type = self::_resolve_target_post_type_from_loop_attrs( $module->attrs );
+
+			if ( '' !== $resolved_post_type ) {
+				self::register_loop_target_post_type( $target_loop_id, $resolved_post_type );
+
+				return $resolved_post_type;
+			}
+		}
+
+		return self::get_registered_loop_target_post_type( $target_loop_id );
+	}
+
+	/**
+	 * Resolve include/exclude term ID restrictions for one taxonomy from loop attrs.
+	 *
+	 * @since ??
+	 *
+	 * @param array  $loop_attrs    Loop attrs (`module.advanced.loop`).
+	 * @param string $taxonomy_slug Taxonomy slug to resolve restrictions for.
+	 *
+	 * @return array{include: int[], exclude: int[], has_include_restriction: bool} Include and exclude term ID lists.
+	 */
+	public static function resolve_loop_term_restrictions_for_taxonomy( array $loop_attrs, string $taxonomy_slug ): array {
+		$include_terms = $loop_attrs['desktop']['value']['includePostWithSpecificTerms'] ?? [];
+		$exclude_terms = $loop_attrs['desktop']['value']['excludePostWithSpecificTerms'] ?? [];
+		$taxonomy_slug = sanitize_key( $taxonomy_slug );
+
+		$include_ids               = self::_extract_valid_term_ids_for_taxonomy( is_array( $include_terms ) ? $include_terms : [], $taxonomy_slug );
+		$exclude_ids               = self::_extract_valid_term_ids_for_taxonomy( is_array( $exclude_terms ) ? $exclude_terms : [], $taxonomy_slug );
+		$has_include_restriction   = self::_has_term_group_for_taxonomy( is_array( $include_terms ) ? $include_terms : [], $taxonomy_slug );
+
+		if ( ! empty( $include_ids ) && ! empty( $exclude_ids ) ) {
+			$include_ids = array_values( array_diff( $include_ids, $exclude_ids ) );
+		}
+
+		return [
+			'include'                 => $include_ids,
+			'exclude'                 => $exclude_ids,
+			'has_include_restriction' => $has_include_restriction,
+		];
+	}
+
+	/**
+	 * Resolve include/exclude term ID restrictions from a target loop id.
+	 *
+	 * @since ??
+	 *
+	 * @param string   $target_loop_id  Target loop id.
+	 * @param string   $taxonomy_slug   Taxonomy slug to resolve restrictions for.
+	 * @param int|null $store_instance  Optional block parser store instance.
+	 *
+	 * @return array{include: int[], exclude: int[], has_include_restriction: bool} Include and exclude term ID lists.
+	 */
+	public static function resolve_loop_term_restrictions_for_taxonomy_from_loop_id(
+		string $target_loop_id,
+		string $taxonomy_slug,
+		$store_instance = null
+	): array {
+		$target_loop_id = trim( $target_loop_id );
+
+		if ( '' === $target_loop_id || '' === $taxonomy_slug ) {
+			return [
+				'include'                 => [],
+				'exclude'                 => [],
+				'has_include_restriction' => false,
+			];
+		}
+
+		$module = self::find_module_by_loop_id( $target_loop_id, $store_instance );
+
+		if ( null !== $module ) {
+			$loop_attrs = $module->attrs['module']['advanced']['loop'] ?? [];
+
+			return self::resolve_loop_term_restrictions_for_taxonomy( is_array( $loop_attrs ) ? $loop_attrs : [], $taxonomy_slug );
+		}
+
+		$registered_term_attrs = self::get_registered_loop_term_restriction_attrs( $target_loop_id );
+
+		if ( ! empty( $registered_term_attrs['include'] ) || ! empty( $registered_term_attrs['exclude'] ) ) {
+			return self::resolve_loop_term_restrictions_for_taxonomy(
+				[
+					'desktop' => [
+						'value' => [
+							'includePostWithSpecificTerms' => $registered_term_attrs['include'],
+							'excludePostWithSpecificTerms' => $registered_term_attrs['exclude'],
+						],
+					],
+				],
+				$taxonomy_slug
+			);
+		}
+
+		return [
+			'include'                 => [],
+			'exclude'                 => [],
+			'has_include_restriction' => false,
+		];
+	}
+
+	/**
+	 * Filter term IDs to those that exist in a taxonomy.
+	 *
+	 * @since ??
+	 *
+	 * @param array  $term_ids Array of term IDs to validate.
+	 * @param string $taxonomy Taxonomy name to validate terms against.
+	 *
+	 * @return array Array of valid term IDs.
+	 */
+	public static function filter_valid_term_ids( array $term_ids, string $taxonomy ): array {
+		return self::_filter_invalid_term_ids( $term_ids, $taxonomy );
+	}
+
+	/**
+	 * Extract validated term IDs for one taxonomy from loop term group attrs.
+	 *
+	 * @since ??
+	 *
+	 * @param array  $term_groups   Loop include/exclude term group attrs.
+	 * @param string $taxonomy_slug Taxonomy slug to match.
+	 *
+	 * @return int[] Valid term IDs for the taxonomy.
+	 */
+	private static function _extract_valid_term_ids_for_taxonomy( array $term_groups, string $taxonomy_slug ): array {
+		foreach ( $term_groups as $term_group ) {
+			if ( ! isset( $term_group['categoryId'], $term_group['selectedOptions'] ) ) {
+				continue;
+			}
+
+			$taxonomy = sanitize_key( $term_group['categoryId'] );
+
+			if ( $taxonomy !== $taxonomy_slug ) {
+				continue;
+			}
+
+			$terms = [];
+
+			if ( is_array( $term_group['selectedOptions'] ) ) {
+				$terms = array_map( 'intval', array_filter( array_column( $term_group['selectedOptions'], 'value' ) ) );
+			}
+
+			if ( empty( $terms ) ) {
+				return [];
+			}
+
+			return self::_filter_invalid_term_ids( $terms, $taxonomy );
+		}
+
+		return [];
+	}
+
+	/**
+	 * Check whether loop attrs configure a term group for one taxonomy.
+	 *
+	 * @since ??
+	 *
+	 * @param array  $term_groups   Loop include/exclude term group attrs.
+	 * @param string $taxonomy_slug Taxonomy slug to match.
+	 *
+	 * @return bool Whether a matching term group is configured.
+	 */
+	private static function _has_term_group_for_taxonomy( array $term_groups, string $taxonomy_slug ): bool {
+		foreach ( $term_groups as $term_group ) {
+			if ( ! isset( $term_group['categoryId'], $term_group['selectedOptions'] ) ) {
+				continue;
+			}
+
+			$taxonomy = sanitize_key( $term_group['categoryId'] );
+
+			if ( $taxonomy !== $taxonomy_slug ) {
+				continue;
+			}
+
+			return is_array( $term_group['selectedOptions'] ) && ! empty( $term_group['selectedOptions'] );
+		}
+
+		return false;
 	}
 
 	/**
@@ -109,6 +633,22 @@ class LoopUtils {
 		if ( empty( $loop_data['query_args'] ) ) {
 			return null;
 		}
+
+		/*
+		 * This filter is required so that features like the Post Filter module
+		 * can intercept and modify the loop's computed query arguments before executing the actual query.
+		 * For example, the Post Filter module adjusts $loop_data here to apply user-selected filters,
+		 * ensuring that the results shown in the loop reflect current filter UI state.
+		 */
+		$loop_data = apply_filters(
+			'divi_loop_data_after_execution',
+			$loop_data,
+			$target_module->attrs,
+			[
+				'attrs'         => $target_module->attrs,
+				'storeInstance' => $store_instance,
+			]
+		);
 
 		$query_result = self::execute_query( $loop_data['query_args'], $loop_data['query_type'] );
 		$loop_query   = $query_result['query_object'] ?? null;
@@ -318,8 +858,6 @@ class LoopUtils {
 	private static function _is_menus_query( $query_type ) {
 		return 'menus' === $query_type;
 	}
-
-
 
 	/**
 	 * Build WP_User_Query arguments for user queries.
@@ -1288,6 +1826,140 @@ class LoopUtils {
 	}
 
 	/**
+	 * Resolve target post type from loop module attrs.
+	 *
+	 * @since ??
+	 *
+	 * @param array $attrs Loop module attrs.
+	 *
+	 * @return string Post type slug or empty string.
+	 */
+	private static function _resolve_target_post_type_from_loop_attrs( array $attrs ): string {
+		$loop         = $attrs['module']['advanced']['loop'] ?? [];
+		$loop_enabled = sanitize_key( $loop['desktop']['value']['enable'] ?? '' );
+
+		if ( 'on' !== $loop_enabled ) {
+			return '';
+		}
+
+		$query_type  = sanitize_key( $loop['desktop']['value']['queryType'] ?? 'post_types' );
+		$sub_types   = self::_extract_sub_type_values( $loop );
+		$first_value = ! empty( $sub_types ) ? (string) $sub_types[0] : '';
+
+		if ( 'post_types' === $query_type ) {
+			return $first_value;
+		}
+
+		if ( 'current_page' === $query_type ) {
+			return '' !== $first_value ? $first_value : 'post';
+		}
+
+		return '';
+	}
+
+	/**
+	 * Register loop target post type from parsed loop data.
+	 *
+	 * @since ??
+	 *
+	 * @param string $loop_id   Loop id.
+	 * @param array  $loop_data Parsed loop data.
+	 *
+	 * @return void
+	 */
+	private static function _register_loop_target_post_type_from_loop_data( string $loop_id, array $loop_data ): void {
+		$post_type = self::_extract_first_post_type_slug_from_loop_data( $loop_data );
+
+		if ( '' !== $post_type ) {
+			self::register_loop_target_post_type( $loop_id, $post_type );
+		}
+	}
+
+	/**
+	 * Register loop order-by context from parsed loop data.
+	 *
+	 * @since ??
+	 *
+	 * @param string $loop_id   Loop id.
+	 * @param array  $loop_data Parsed loop data.
+	 *
+	 * @return void
+	 */
+	private static function _register_loop_order_by_context_from_loop_data( string $loop_id, array $loop_data ): void {
+		$query_type    = sanitize_key( $loop_data['query_type'] ?? 'post_types' );
+		$sub_type      = $loop_data['post_type'] ?? '';
+		$first_subtype = '';
+
+		if ( is_array( $sub_type ) && ! empty( $sub_type ) ) {
+			$first_subtype = sanitize_key( (string) $sub_type[0] );
+		} elseif ( is_string( $sub_type ) && '' !== $sub_type ) {
+			$first_subtype = sanitize_key( $sub_type );
+		}
+
+		if ( in_array( $query_type, [ 'post_taxonomies', 'terms' ], true ) ) {
+			self::register_loop_order_by_context( $loop_id, 'post_taxonomies', $first_subtype );
+
+			return;
+		}
+
+		if ( 'user_roles' === $query_type ) {
+			self::register_loop_order_by_context( $loop_id, 'user_roles' );
+
+			return;
+		}
+
+		if ( 'menus' === $query_type ) {
+			self::register_loop_order_by_context( $loop_id, 'menus', '', $first_subtype );
+
+			return;
+		}
+
+		if ( 'current_page' === $query_type ) {
+			$post_type = self::_extract_first_post_type_slug_from_loop_data( $loop_data );
+
+			self::register_loop_order_by_context(
+				$loop_id,
+				'current_page',
+				'',
+				'' !== $post_type ? $post_type : 'post'
+			);
+
+			return;
+		}
+
+		$post_type = self::_extract_first_post_type_slug_from_loop_data( $loop_data );
+
+		self::register_loop_order_by_context(
+			$loop_id,
+			'post_types',
+			'',
+			'' !== $post_type ? $post_type : 'post'
+		);
+	}
+
+	/**
+	 * Register loop term restriction attrs from parsed block attrs.
+	 *
+	 * @since ??
+	 *
+	 * @param string $loop_id      Loop id.
+	 * @param array  $block_attrs  Parsed block attrs.
+	 *
+	 * @return void
+	 */
+	private static function _register_loop_term_restriction_attrs_from_block_attrs( string $loop_id, array $block_attrs ): void {
+		$loop          = $block_attrs['module']['advanced']['loop'] ?? [];
+		$include_terms = $loop['desktop']['value']['includePostWithSpecificTerms'] ?? [];
+		$exclude_terms = $loop['desktop']['value']['excludePostWithSpecificTerms'] ?? [];
+
+		self::register_loop_term_restriction_attrs(
+			$loop_id,
+			is_array( $include_terms ) ? $include_terms : [],
+			is_array( $exclude_terms ) ? $exclude_terms : []
+		);
+	}
+
+	/**
 	 * Checks whether a loop subTypes entry looks like a value-label pair.
 	 *
 	 * @since ??
@@ -1338,6 +2010,79 @@ class LoopUtils {
 			},
 			$valid_entries
 		);
+	}
+
+	/**
+	 * Resolve order-by context from loop module attrs.
+	 *
+	 * @since ??
+	 *
+	 * @param array $attrs Loop module attrs.
+	 *
+	 * @return array{query_type: string, post_type: string, taxonomy: string}
+	 */
+	private static function _resolve_order_by_context_from_loop_attrs( array $attrs ): array {
+		$default_context = [
+			'query_type' => 'post_types',
+			'post_type'  => 'post',
+			'taxonomy'   => '',
+		];
+
+		$loop         = $attrs['module']['advanced']['loop'] ?? [];
+		$loop_enabled = sanitize_key( $loop['desktop']['value']['enable'] ?? '' );
+
+		if ( 'on' !== $loop_enabled ) {
+			return $default_context;
+		}
+
+		$loop_data = self::get_query_args_from_attrs( $attrs );
+		$loop_id   = sanitize_key( $loop['desktop']['value']['loopId'] ?? '' );
+
+		if ( '' !== $loop_id ) {
+			self::_register_loop_order_by_context_from_loop_data( $loop_id, $loop_data );
+		}
+
+		$registered_context = '' !== $loop_id ? self::get_registered_loop_order_by_context( $loop_id ) : [];
+
+		if ( ! empty( $registered_context ) ) {
+			return array_merge( $default_context, $registered_context );
+		}
+
+		return $default_context;
+	}
+
+	/**
+	 * Extract the first post type slug from parsed loop data.
+	 *
+	 * @since ??
+	 *
+	 * @param array $loop_data Parsed loop data.
+	 *
+	 * @return string Post type slug or empty string.
+	 */
+	private static function _extract_first_post_type_slug_from_loop_data( array $loop_data ): string {
+		$query_type = sanitize_key( $loop_data['query_type'] ?? '' );
+		$post_type  = $loop_data['post_type'] ?? null;
+
+		if ( 'post_types' === $query_type ) {
+			if ( is_array( $post_type ) && ! empty( $post_type ) ) {
+				return sanitize_key( (string) $post_type[0] );
+			}
+
+			if ( is_string( $post_type ) && '' !== $post_type ) {
+				return sanitize_key( $post_type );
+			}
+		}
+
+		if ( 'current_page' === $query_type ) {
+			if ( is_array( $post_type ) && ! empty( $post_type ) ) {
+				return sanitize_key( (string) $post_type[0] );
+			}
+
+			return 'post';
+		}
+
+		return '';
 	}
 
 	/**
@@ -2625,6 +3370,8 @@ class LoopUtils {
 			return $document;
 		}
 
+		self::_register_loop_target_post_types_from_blocks( $parsed_blocks );
+
 		// Process blocks recursively to handle nested structures.
 		$duplicated_blocks = self::_duplicate_loop_enabled_blocks( $parsed_blocks );
 
@@ -2727,6 +3474,10 @@ class LoopUtils {
 			// Get the loop data.
 			$loop_data = self::get_query_args_from_attrs( $block['attrs'] );
 
+			if ( ! empty( $loop_id ) ) {
+				self::_register_loop_target_post_type_from_loop_data( $loop_id, $loop_data );
+			}
+
 			/*
 			* Filter: `divi_loop_data_before_execution`,
 			*
@@ -2767,15 +3518,6 @@ class LoopUtils {
 			? $block['attrs']['module']['advanced']['loop']['desktop']['value']['loopId']
 			: null;
 
-			$existing_query = null;
-			if ( ! empty( $loop_id ) ) {
-				$existing_query = LoopQueryRegistry::get_query_if_matches(
-					$loop_id,
-					$loop_data['query_args'],
-					$loop_data['query_type']
-				);
-			}
-
 			/**
 			 * Filters the loop data after all processing but before query execution.
 			 *
@@ -2802,6 +3544,15 @@ class LoopUtils {
 			 */
 			$loop_data = apply_filters( 'divi_loop_data_after_execution', $loop_data, $block['attrs'], $block );
 
+			$existing_query = null;
+			if ( ! empty( $loop_id ) ) {
+				$existing_query = LoopQueryRegistry::get_query_if_matches(
+					$loop_id,
+					$loop_data['query_args'],
+					$loop_data['query_type']
+				);
+			}
+
 			// Use unified execute_query function for both fresh and cached queries.
 			$query = self::execute_query( $loop_data['query_args'], $loop_data['query_type'], $existing_query );
 
@@ -2820,6 +3571,11 @@ class LoopUtils {
 			// Handle empty results.
 			if ( empty( $query['results'] ) ) {
 				$block['attrs']['__loop_no_results'] = true;
+
+				if ( ! empty( $loop_id ) ) {
+					$block['attrs']['__loop_source_id'] = $loop_id;
+				}
+
 				return [ $block ];
 			}
 
@@ -2862,6 +3618,7 @@ class LoopUtils {
 				// For example, tabs use this to ensure only the first tab in the first iteration is active,
 				// similar to how accordion items use it to ensure only the first item in the first iteration is open.
 				$base_block['attrs']['__loop_iteration'] = $iteration;
+				$base_block['attrs']['__loop_source_id']  = $loop_id;
 
 				// Store post ID for later use during rendering (when $query_item is no longer available).
 				$post_id = self::_get_current_post_id( $query_type, $query_item );

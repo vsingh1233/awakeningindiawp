@@ -592,13 +592,6 @@ class TogglePresetAttrsMap {
 				],
 				'subName'  => 'textAlign',
 			],
-			'title.decoration.font.font__color'            => [
-				'attrName' => 'title.decoration.font.font',
-				'preset'   => [
-					'style',
-				],
-				'subName'  => 'color',
-			],
 			'title.decoration.font.font__size'             => [
 				'attrName' => 'title.decoration.font.font',
 				'preset'   => [

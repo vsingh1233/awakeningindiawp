@@ -126,7 +126,7 @@ class Layout {
 								// Use auto-fit with calc formula when collapse is enabled and grid direction is row.
 								$declarations->add( 'grid-template-columns', 'repeat(auto-fit, minmax(calc((100% - (var(--column-count) - 1) * var(--horizontal-gap, 0px)) / var(--column-count)), 1fr))' );
 							} else {
-								$declarations->add( 'grid-template-columns', 'repeat(var(--column-count), 1fr)' );
+								$declarations->add( 'grid-template-columns', 'repeat(var(--column-count), minmax(0, 1fr))' );
 							}
 						}
 					} elseif ( 'equalMinimum' === $effective_grid_column_widths ) {
@@ -256,6 +256,7 @@ class Layout {
 				// Flex-specific CSS declarations.
 				if ( $flex_direction ) {
 					$declarations->add( 'flex-direction', $flex_direction );
+					$declarations->add( '--flex-direction', $flex_direction );
 				}
 
 				if ( $justify_content ) {

@@ -178,6 +178,14 @@ class SettingsData implements DependencyInterface {
 
 		self::register_item(
 			[
+				'name'               => 'gravityForms',
+				'usage'              => 'app_load',
+				'get_value_function' => [ SettingsDataCallbacks::class, 'gravity_forms' ],
+			]
+		);
+
+		self::register_item(
+			[
 				'name'               => 'nonces',
 				'usage'              => 'app_load',
 				'get_value_function' => [ SettingsDataCallbacks::class, 'nonces' ],
@@ -221,6 +229,14 @@ class SettingsData implements DependencyInterface {
 				'name'               => 'services',
 				'usage'              => 'after_app_load',
 				'get_value_function' => [ SettingsDataCallbacks::class, 'services' ],
+			]
+		);
+
+		self::register_item(
+			[
+				'name'               => 'announcements',
+				'usage'              => 'after_app_load',
+				'get_value_function' => [ SettingsDataCallbacks::class, 'announcements' ],
 			]
 		);
 
@@ -325,6 +341,14 @@ class SettingsData implements DependencyInterface {
 				'name'               => 'woocommerce',
 				'usage'              => 'app_load',
 				'get_value_function' => [ SettingsDataCallbacks::class, 'woocommerce' ],
+			]
+		);
+
+		self::register_item(
+			[
+				'name'               => 'imagelyGallery',
+				'usage'              => 'app_load',
+				'get_value_function' => [ SettingsDataCallbacks::class, 'imagely_gallery' ],
 			]
 		);
 

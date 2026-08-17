@@ -269,6 +269,28 @@
               }
             }
           },
+          "postsNumber": {
+            "groupType": "group-item",
+            "item": {
+              "groupSlug": "contentMainContent",
+              "attrName": "content.advanced.postsNumber",
+              "label": "Image Count",
+              "description": "Define the number of images that should be displayed per page.",
+              "category": "configuration",
+              "features": {
+                "responsive": false,
+                "hover": false,
+                "sticky": false,
+                "preset": "content"
+              },
+              "priority": 20,
+              "render": true,
+              "component": {
+                "type": "field",
+                "name": "divi/text"
+              }
+            }
+          },
           "showPagination": {
             "groupType": "group-item",
             "item": {
@@ -298,8 +320,7 @@
                 "name": "divi/toggle"
               }
             }
-          },
-          "postsNumber": {}
+          }
         }
       }
     },

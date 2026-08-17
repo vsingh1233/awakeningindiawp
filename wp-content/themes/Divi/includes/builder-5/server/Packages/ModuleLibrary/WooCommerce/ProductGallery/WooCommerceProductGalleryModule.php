@@ -55,6 +55,25 @@ use WP_Block;
 class WooCommerceProductGalleryModule implements DependencyInterface {
 
 	/**
+	 * Resolve per-page count from posts number with deterministic fallback.
+	 *
+	 * @since ??
+	 *
+	 * @param int|string $posts_number Posts number value.
+	 *
+	 * @return int
+	 */
+	public static function normalize_posts_number( $posts_number ): int {
+		$posts_number = absint( $posts_number );
+
+		if ( 0 === $posts_number ) {
+			$posts_number = 4;
+		}
+
+		return $posts_number;
+	}
+
+	/**
 	 * Gets Placeholder ID as Gallery IDs when in TB mode or Unsupported REST API request.
 	 *
 	 * Based on D4 ET_Builder_Module_Woocommerce_Gallery::get_gallery_ids()
@@ -561,6 +580,8 @@ class WooCommerceProductGalleryModule implements DependencyInterface {
 		// Set gallery layout based on fullwidth attribute.
 		$args['gallery_layout'] = 'on' === $args['fullwidth'] ? 'slider' : 'grid';
 
+		$posts_number = self::normalize_posts_number( $args['posts_number'] );
+
 		// Get WooCommerce gallery attachments.
 		$attachments = self::get_wc_gallery( $args );
 
@@ -583,7 +604,7 @@ class WooCommerceProductGalleryModule implements DependencyInterface {
 
 		// Prepare rendering arguments.
 		$render_args = [
-			'posts_number'           => $args['posts_number'],
+			'posts_number'           => $posts_number,
 			'fullwidth'              => $args['fullwidth'],
 			'gallery_layout'         => $args['gallery_layout'],
 			'show_title_and_caption' => $args['show_title_and_caption'],
@@ -1543,9 +1564,6 @@ class WooCommerceProductGalleryModule implements DependencyInterface {
 		$show_title_and_caption = $has_title_and_caption ? 'on' : 'off';
 		$posts_number           = $attrs['content']['advanced']['postsNumber'][ $default_breakpoint ][ $default_state ] ?? 4;
 		$heading_level          = $attrs['title']['decoration']['font']['font'][ $default_breakpoint ][ $default_state ]['headingLevel'] ?? 'h3';
-
-		// Convert posts_number to int (D4 Gallery render() line 575).
-		$posts_number = 0 === intval( $posts_number ) ? 4 : intval( $posts_number );
 
 		// Validate orientation (D4 Gallery render() line 531-532).
 		$orientation = 'portrait' === $orientation ? 'portrait' : 'landscape';

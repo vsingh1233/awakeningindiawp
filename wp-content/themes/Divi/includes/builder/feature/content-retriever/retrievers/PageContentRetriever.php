@@ -103,14 +103,16 @@ trait PageContentRetriever {
 		 */
 		foreach ( $enabled_layout_ids as $key => $layout_id ) {
 			if ( 'content' === $layout_id ) {
-				// NEW: Check if $wp_post is valid before accessing post_content
-				// For 404 pages and other cases where $wp_post is invalid, skip adding post content
-				// but continue processing Theme Builder layouts
-				if ( ! empty( $wp_post ) && isset( $wp_post->post_content ) ) {
+				// Skip result post_content on search: the shared search Static CSS / Dynamic
+				// Assets cache must be driven by Theme Builder layouts only. Appending the
+				// first result's Divi layout pollutes early feature detection (#50637).
+				// For 404 and other cases where $wp_post is invalid, also skip post content
+				// but continue processing Theme Builder layouts.
+				if ( ! is_search() && ! empty( $wp_post ) && isset( $wp_post->post_content ) ) {
 					$entire_page_content .= $wp_post->post_content;
 				}
 			} else {
-				$layout               = get_post( $layout_id );
+				$layout = get_post( $layout_id );
 				if ( ! empty( $layout ) ) {
 					$entire_page_content .= $layout->post_content;
 				}

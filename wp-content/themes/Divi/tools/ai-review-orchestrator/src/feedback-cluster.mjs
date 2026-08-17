@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { getDefaultDbPath, loadVectorExtension, openDb } from "./db.mjs";
+import { getDefaultDbPath, loadVectorExtension, openDb, updateClusterTags } from "./db.mjs";
 
 const args = process.argv.slice(2);
 
@@ -122,6 +122,46 @@ const addClusterMember = (db, { clusterId, commentId, distance }) => {
     created_at: new Date().toISOString(),
   });
 };
+
+const rollupClusterTags = (db, clusterId) => {
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        ct.tag as tag,
+        COUNT(*) as count
+      FROM comment_tags ct
+      INNER JOIN cluster_members cm ON cm.comment_id = ct.comment_id
+      WHERE cm.cluster_id = ?
+      GROUP BY ct.tag
+      ORDER BY count DESC, ct.tag ASC
+    `
+    )
+    .all(clusterId);
+  updateClusterTags(db, {
+    clusterId,
+    tagsJson: JSON.stringify(rows),
+  });
+  return rows;
+};
+
+const fetchRunTagHistogram = (db, runId) =>
+  db
+    .prepare(
+      `
+      SELECT
+        ct.tag as tag,
+        COUNT(*) as count
+      FROM comment_tags ct
+      INNER JOIN cluster_members cm ON cm.comment_id = ct.comment_id
+      INNER JOIN clusters cl ON cl.id = cm.cluster_id
+      WHERE cl.run_id = ?
+      GROUP BY ct.tag
+      ORDER BY count DESC, ct.tag ASC
+      LIMIT 20
+    `
+    )
+    .all(runId);
 
 const searchNeighbors = ({
   db,
@@ -368,6 +408,9 @@ const main = () => {
       remaining.delete(neighbor.comment_id);
       membersAdded += 1;
     });
+    if (false === dryRun) {
+      rollupClusterTags(db, clusterId);
+    }
   }
 
   const summarizeSizes = (sizes) => {
@@ -407,6 +450,8 @@ const main = () => {
         members: membersAdded,
         dry_run: dryRun,
         cluster_sizes: summarizeSizes(clusterSizes),
+        top_tags:
+          false === dryRun && null != runId ? fetchRunTagHistogram(db, runId) : [],
       },
       null,
       2

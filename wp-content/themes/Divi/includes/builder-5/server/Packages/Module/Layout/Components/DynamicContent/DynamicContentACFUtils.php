@@ -155,8 +155,8 @@ class DynamicContentACFUtils {
 				$field_name  = $field['name'] ?? '';
 				$field_label = $field['label'] ?? $field_name;
 
-				// Skip repeater and group fields for now (they have their own handling).
-				if ( in_array( $field_type, [ 'repeater', 'group', 'flexible_content' ], true ) ) {
+				// Skip repeater and flexible content fields (they have their own handling).
+				if ( in_array( $field_type, [ 'repeater', 'flexible_content' ], true ) ) {
 					continue;
 				}
 
@@ -172,6 +172,134 @@ class DynamicContentACFUtils {
 		self::$_acf_field_info_cache[ $meta_type ] = $acf_fields;
 
 		return self::$_acf_field_info_cache[ $meta_type ];
+	}
+
+	/**
+	 * ACF field types that do not map to a single flat meta key for post-filter search.
+	 *
+	 * @since ??
+	 *
+	 * @return array<int, string>
+	 */
+	public static function get_non_searchable_acf_field_types(): array {
+		return [
+			'repeater',
+			'flexible_content',
+			'clone',
+			'tab',
+			'accordion',
+			'message',
+		];
+	}
+
+	/**
+	 * Collect flat post meta keys from an ACF field definition tree.
+	 *
+	 * Group fields expand to prefixed sub-field keys (for example `address` + `city` => `address_city`).
+	 * Layout and composite field types are skipped. See `specs/dynamic-content/acf-field-types-and-post-filter-search.md`.
+	 *
+	 * @since ??
+	 *
+	 * @param array<int, array<string, mixed>> $fields      ACF field definitions.
+	 * @param string                           $name_prefix Meta key prefix for nested fields.
+	 *
+	 * @return array<int, string>
+	 */
+	public static function collect_flat_leaf_meta_keys_from_acf_fields( array $fields, string $name_prefix = '' ): array {
+		$meta_keys = [];
+
+		foreach ( $fields as $field ) {
+			if ( ! is_array( $field ) ) {
+				continue;
+			}
+
+			$field_type = $field['type'] ?? '';
+			$field_name = $field['name'] ?? '';
+
+			if ( '' === $field_name ) {
+				continue;
+			}
+
+			$full_name = $name_prefix . $field_name;
+
+			if ( 'group' === $field_type ) {
+				$sub_fields = $field['sub_fields'] ?? [];
+
+				if ( is_array( $sub_fields ) && ! empty( $sub_fields ) ) {
+					$meta_keys = array_merge(
+						$meta_keys,
+						self::collect_flat_leaf_meta_keys_from_acf_fields( $sub_fields, $full_name . '_' )
+					);
+				}
+
+				continue;
+			}
+
+			if ( in_array( $field_type, self::get_non_searchable_acf_field_types(), true ) ) {
+				continue;
+			}
+
+			$meta_keys[] = $full_name;
+		}
+
+		return array_values( array_unique( $meta_keys ) );
+	}
+
+	/**
+	 * Resolve one custom-field search target to the flat meta keys that should be queried.
+	 *
+	 * When ACF is active and the target is a group field, this expands to all searchable leaf
+	 * sub-field meta keys. Non-group fields resolve to the submitted meta key unchanged.
+	 *
+	 * @since ??
+	 *
+	 * @param string $meta_key  Submitted meta key or ACF field name.
+	 * @param string $meta_type Meta object type (`post`, `user`, or `term`). Post-filter search uses `post`.
+	 *
+	 * @return array<int, string>
+	 */
+	public static function resolve_search_meta_keys( string $meta_key, string $meta_type = 'post' ): array {
+		$meta_key = ltrim( sanitize_text_field( $meta_key ), '_' );
+
+		if ( '' === $meta_key ) {
+			return [];
+		}
+
+		$resolved_keys = [ $meta_key ];
+
+		if ( self::is_acf_active() && function_exists( 'acf_get_field' ) ) {
+			$field = acf_get_field( $meta_key );
+
+			if ( is_array( $field ) && ! empty( $field['name'] ) ) {
+				$field_type = $field['type'] ?? '';
+
+				if ( 'group' === $field_type ) {
+					$sub_fields = $field['sub_fields'] ?? [];
+
+					if ( is_array( $sub_fields ) && ! empty( $sub_fields ) ) {
+						$expanded_keys = self::collect_flat_leaf_meta_keys_from_acf_fields(
+							$sub_fields,
+							$field['name'] . '_'
+						);
+
+						if ( ! empty( $expanded_keys ) ) {
+							$resolved_keys = $expanded_keys;
+						}
+					}
+				}
+			}
+		}
+
+		/**
+		 * Filters the flat meta keys used when searching a custom-field target.
+		 *
+		 * @since ??
+		 *
+		 * @param array<int, string> $resolved_keys Flat meta keys to include in meta_query search clauses.
+		 * @param string             $meta_key      Original submitted meta key.
+		 * @param string             $meta_type     Meta object type (`post`, `user`, or `term`).
+		 */
+		return apply_filters( 'divi_resolve_search_meta_keys', $resolved_keys, $meta_key, $meta_type );
 	}
 
 	/**

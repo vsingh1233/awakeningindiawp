@@ -548,6 +548,7 @@ class WooCommerceProductTabsModule implements DependencyInterface {
 							[
 								'et_pb_tab_nav_item' => true,
 								'et_pb_tab_nav_item_' . esc_attr( $name ) => true,
+								esc_attr( $name ) . '_tab' => true,
 								'et_pb_tab_active'   => 1 === $index,
 							]
 						),
@@ -597,10 +598,9 @@ class WooCommerceProductTabsModule implements DependencyInterface {
 					'attributes'        => [
 						'class' => HTMLUtility::classnames(
 							[
-								esc_attr( $name ) . '_tab' => true,
-								'et_pb_tab'                => true,
-								'clearfix'                 => true,
-								'et_pb_active_content'     => 1 === $index,
+								'et_pb_tab'            => true,
+								'clearfix'             => true,
+								'et_pb_active_content' => 1 === $index,
 							]
 						),
 					],
@@ -783,11 +783,10 @@ class WooCommerceProductTabsModule implements DependencyInterface {
 				// Ensure $name is a string to prevent null being passed to callbacks.
 				$name = is_string( $name ) ? $name : '';
 
-				// For comments_template callback, ensure it's called correctly to prevent rtrim() null errors.
-				// WordPress 6.9+ and newer WooCommerce are stricter about null values in rtrim() calls.
-				// comments_template() expects ( $file = '', $separate_comments = false ), but WooCommerce
-				// passes ( $name, $tab ), so we need to call it directly with correct parameters.
-				if ( 'comments_template' === $tab['callback'] ) {
+				// For reviews tab callback, ensure comments template is called with safe globals + params.
+				// WooCommerce may provide either `comments_template` or a wrapped callable for reviews.
+				$is_reviews_tab_callback = 'reviews' === $name && is_callable( $tab['callback'] );
+				if ( 'comments_template' === $tab['callback'] || $is_reviews_tab_callback ) {
 					// Ensure product global is set and valid before calling comments_template().
 					// WooCommerce's review template expects $product to be a valid WC_Product instance.
 					global $product;
@@ -813,6 +812,18 @@ class WooCommerceProductTabsModule implements DependencyInterface {
 						if ( ! isset( $wp_template_path ) || null === $wp_template_path ) {
 							$template_path    = get_template_directory();
 							$wp_template_path = is_string( $template_path ) ? $template_path : '';
+						}
+
+						// Ensure query vars are initialized for comments template resolution.
+						// WordPress template lookup can flow into `rtrim()` with null query var values.
+						if ( is_a( $wp_query, 'WP_Query' ) ) {
+							$query_vars_to_ensure = [ 'cpage', 'paged', 'page' ];
+
+							foreach ( $query_vars_to_ensure as $query_var ) {
+								if ( ! isset( $wp_query->query_vars[ $query_var ] ) || null === $wp_query->query_vars[ $query_var ] ) {
+									$wp_query->query_vars[ $query_var ] = '';
+								}
+							}
 						}
 
 						// Set up post data for template tags and WordPress functions that expect setup_postdata() to be called.

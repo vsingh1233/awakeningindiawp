@@ -75,6 +75,46 @@ class SvgAllowedList {
 	}
 
 	/**
+	 * Text-specific SVG attributes.
+	 *
+	 * @return array<string, bool>
+	 */
+	private static function _text_attributes(): array {
+		return [
+			'x'            => true,
+			'y'            => true,
+			'dx'           => true,
+			'dy'           => true,
+			'rotate'       => true,
+			'textLength'   => true,
+			'textlength'   => true,
+			'lengthAdjust' => true,
+			'lengthadjust' => true,
+		];
+	}
+
+	/**
+	 * textPath-specific SVG attributes.
+	 *
+	 * @return array<string, bool>
+	 */
+	private static function _text_path_attributes(): array {
+		return [
+			'href'         => true,
+			'xlink:href'   => true,
+			'startOffset'  => true,
+			'startoffset'  => true,
+			'method'       => true,
+			'spacing'      => true,
+			'side'         => true,
+			'textLength'   => true,
+			'textlength'   => true,
+			'lengthAdjust' => true,
+			'lengthadjust' => true,
+		];
+	}
+
+	/**
 	 * Get root svg custom attributes used in post-sanitize merge path.
 	 *
 	 * @return array<string, bool>
@@ -96,6 +136,7 @@ class SvgAllowedList {
 	 */
 	public static function get_allowed_svg_html(): array {
 		$common_attributes = self::_common_attributes();
+		$text_attributes   = self::_text_attributes();
 
 		return [
 			'svg'            => self::_root_svg_base_attributes(),
@@ -140,6 +181,9 @@ class SvgAllowedList {
 			),
 			'polyline'       => array_merge( $common_attributes, [ 'points' => true ] ),
 			'polygon'        => array_merge( $common_attributes, [ 'points' => true ] ),
+			'text'           => array_merge( $common_attributes, $text_attributes ),
+			'tspan'          => array_merge( $common_attributes, $text_attributes ),
+			'textPath'       => array_merge( $common_attributes, self::_text_path_attributes() ),
 			'defs'           => [],
 			'title'          => [],
 			'desc'           => [],

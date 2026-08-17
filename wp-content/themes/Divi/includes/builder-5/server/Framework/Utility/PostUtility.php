@@ -11,6 +11,7 @@ namespace ET\Builder\Framework\Utility;
 // phpcs:disable Universal.NamingConventions.NoReservedKeywordParameterNames -- Reserved keywords used intentionally for clarity in utility functions.
 use ET\Builder\Packages\Module\Layout\Components\DynamicContent\DynamicContentUtils;
 use ET\Builder\FrontEnd\BlockParser\BlockParserStore;
+use ET\Builder\FrontEnd\BlockParser\SimpleBlockParser;
 
 if ( ! defined( 'ABSPATH' ) ) {
 	die( 'Direct access forbidden.' );
@@ -83,22 +84,25 @@ class PostUtility {
 			// Remove embed shortcode from post content.
 			$truncate = preg_replace( '@\[embed[^\]]*?\].*?\[\/embed]@si', '', $truncate );
 
-			// Apply the content filters to the post content to parse blocks.
-			$truncate = BlockParserStore::render_inner_content( $truncate );
-
-			// Remove icon markup from rendered content to prevent icon characters in excerpts.
-			$truncate = self::remove_icon_markup( $truncate );
-
-			// Ensure adjacent tags preserve whitespace when tags are stripped.
-			$truncate = self::ensure_space_between_tags( $truncate );
-
-			// Remove script and style tags from the post content.
-			$truncate = wp_strip_all_tags( $truncate );
-
 			if ( $strip_shortcodes ) {
+				// Lightweight excerpt path: extract plain text without full builder render (D4 parity).
+				$truncate = self::_extract_plain_text_from_content( $truncate, (int) $amount );
+				$truncate = wp_strip_all_tags( $truncate );
 				$truncate = et_strip_shortcodes( $truncate );
 				$truncate = DynamicContentUtils::get_strip_dynamic_content( $truncate );
 			} else {
+				// Full render path for callers that need rendered module output.
+				$truncate = BlockParserStore::render_inner_content( $truncate );
+
+				// Remove icon markup from rendered content to prevent icon characters in excerpts.
+				$truncate = self::remove_icon_markup( $truncate );
+
+				// Ensure adjacent tags preserve whitespace when tags are stripped.
+				$truncate = self::ensure_space_between_tags( $truncate );
+
+				// Remove script and style tags from the post content.
+				$truncate = wp_strip_all_tags( $truncate );
+
 				// Check if content should be overridden with a custom value.
 				$custom = apply_filters( 'et_truncate_post_use_custom_content', false, $truncate, $post );
 				// apply content filters.
@@ -159,6 +163,127 @@ class PostUtility {
 			} else {
 				return $truncate;
 			}
+		}
+	}
+
+	/**
+	 * Prepare block post content for excerpt stripping without full builder rendering.
+	 *
+	 * Replaces each parsed block comment with readable innerContent text while
+	 * preserving legacy shortcodes, plain HTML, and block innerHTML. Remaining
+	 * block markers are removed so D4-style tag/shortcode stripping can run on
+	 * the full body.
+	 *
+	 * @since ??
+	 *
+	 * @param string $content    Post content.
+	 * @param int    $max_length Target excerpt character length. Zero disables early exit.
+	 *
+	 * @return string Content prepared for excerpt stripping.
+	 */
+	private static function _extract_plain_text_from_content( string $content, int $max_length = 0 ): string {
+		if ( '' === $content || ! str_contains( $content, '<!-- wp:' ) ) {
+			return $content;
+		}
+
+		if ( ! str_contains( $content, '"innerContent"' ) ) {
+			return $content;
+		}
+
+		$parsed_blocks = SimpleBlockParser::parse( $content );
+
+		if ( 0 === count( $parsed_blocks ) ) {
+			return $content;
+		}
+
+		$prepared_content    = $content;
+		$length_limit        = $max_length;
+		$extracted_fragments = [];
+
+		foreach ( $parsed_blocks as $block ) {
+			if ( $block->error() ) {
+				continue;
+			}
+
+			$block_raw = $block->raw();
+
+			if ( '' === $block_raw || ! str_contains( $prepared_content, $block_raw ) ) {
+				continue;
+			}
+
+			$block_fragments = [];
+			$attrs           = $block->attrs();
+
+			if ( ! empty( $attrs ) ) {
+				self::_collect_plain_text_from_attrs( $attrs, $block_fragments );
+			}
+
+			$replacement = empty( $block_fragments )
+				? ' '
+				: ' ' . implode( ' ', $block_fragments ) . ' ';
+
+			$prepared_content = str_replace( $block_raw, $replacement, $prepared_content );
+
+			if ( ! empty( $block_fragments ) ) {
+				$extracted_fragments = array_merge( $extracted_fragments, $block_fragments );
+			}
+
+			if ( $length_limit > 0 && strlen( implode( ' ', $extracted_fragments ) ) >= $length_limit ) {
+				break;
+			}
+		}
+
+		// Remove closing block comments and any remaining unparsed block markers.
+		$prepared_content = preg_replace( '/<!--\s*\/?wp:[^>]*-->/', ' ', $prepared_content );
+
+		return $prepared_content;
+	}
+
+	/**
+	 * Collect plain text fragments recursively from block attrs.
+	 *
+	 * Walks nested attrs for innerContent desktop values. Supports string values
+	 * and object-shaped values (e.g. button text).
+	 *
+	 * @since ??
+	 *
+	 * @param array $attrs          Attrs node.
+	 * @param array $text_fragments Text fragment accumulator.
+	 *
+	 * @return void
+	 */
+	private static function _collect_plain_text_from_attrs( array $attrs, array &$text_fragments ): void {
+		foreach ( $attrs as $attr_value ) {
+			if ( ! is_array( $attr_value ) ) {
+				continue;
+			}
+
+			$desktop_value = $attr_value['innerContent']['desktop']['value'] ?? null;
+
+			if ( null !== $desktop_value ) {
+				$text = '';
+
+				if ( is_string( $desktop_value ) ) {
+					$text = HTMLUtility::decode_wordpress_block_entities( $desktop_value );
+				} elseif ( is_array( $desktop_value ) ) {
+					$text_keys = [ 'text', 'title', 'label', 'subtitle', 'author' ];
+
+					foreach ( $text_keys as $text_key ) {
+						if ( isset( $desktop_value[ $text_key ] ) && is_string( $desktop_value[ $text_key ] ) ) {
+							$text = HTMLUtility::decode_wordpress_block_entities( $desktop_value[ $text_key ] );
+							break;
+						}
+					}
+				}
+
+				$plain_text = wp_strip_all_tags( $text );
+
+				if ( '' !== $plain_text ) {
+					$text_fragments[] = $plain_text;
+				}
+			}
+
+			self::_collect_plain_text_from_attrs( $attr_value, $text_fragments );
 		}
 	}
 

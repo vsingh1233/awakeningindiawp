@@ -14,6 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 use ET\Builder\Packages\StyleLibrary\Utils\StyleDeclarations;
 use ET\Builder\Packages\ModuleUtils\ModuleUtils;
+use ET\Builder\Packages\GlobalData\GlobalData;
 use ET\Builder\Packages\StyleLibrary\Utils\GlobalVariableReferenceUtils;
 use ET\Builder\Packages\StyleLibrary\Declarations\Background\Background;
 use ET\Builder\Packages\StyleLibrary\Declarations\Background\Utils\BackgroundStyleUtils;
@@ -28,6 +29,70 @@ use ET\Builder\Packages\StyleLibrary\Utils\Utils;
  * @since ??
  */
 class TextEffects {
+
+	/**
+	 * Determine whether a gradient stops string is a valid global gradient reference.
+	 *
+	 * @since ??
+	 *
+	 * @param mixed $gradient_stops Gradient stops candidate.
+	 *
+	 * @return bool
+	 */
+	private static function _is_gradient_variable_stops_reference( $gradient_stops ): bool {
+		if ( ! is_string( $gradient_stops ) || '' === $gradient_stops ) {
+			return false;
+		}
+
+		if ( '' !== GlobalVariableReferenceUtils::sanitize_css_reference( $gradient_stops, 'gvid' ) ) {
+			return true;
+		}
+
+		if ( '' !== GlobalVariableReferenceUtils::sanitize_variable_id( $gradient_stops, 'gvid' ) ) {
+			return true;
+		}
+
+		if ( str_starts_with( $gradient_stops, '$variable(' ) && '$' === substr( $gradient_stops, -1 ) ) {
+			$variable_content = substr( $gradient_stops, 10, -2 );
+			$variable_data    = json_decode( $variable_content, true );
+			$variable_name    = $variable_data['value']['name'] ?? '';
+
+			return is_array( $variable_data )
+				&& 'gradient' === ( $variable_data['type'] ?? '' )
+				&& is_string( $variable_name )
+				&& '' !== GlobalVariableReferenceUtils::sanitize_variable_id( $variable_name, 'gvid' );
+		}
+
+		return false;
+	}
+
+	/**
+	 * Determine whether gradient stops can render into real gradient CSS.
+	 *
+	 * @since ??
+	 *
+	 * @param mixed $gradient_stops Gradient stops candidate.
+	 *
+	 * @return bool
+	 */
+	private static function _has_renderable_gradient_stops( $gradient_stops ): bool {
+		if ( is_array( $gradient_stops ) ) {
+			return count( $gradient_stops ) >= 2;
+		}
+
+		if ( ! is_string( $gradient_stops ) || '' === $gradient_stops ) {
+			return false;
+		}
+
+		if ( self::_is_gradient_variable_stops_reference( $gradient_stops ) ) {
+			return true;
+		}
+
+		$resolved_gradient = GlobalData::resolve_global_gradient_variable( $gradient_stops );
+		$resolved_stops    = $resolved_gradient['stops'] ?? null;
+
+		return is_array( $resolved_stops ) && count( $resolved_stops ) >= 2;
+	}
 
 	/**
 	 * Format image fill URL into CSS background-image value.
@@ -165,7 +230,7 @@ class TextEffects {
 				]
 			);
 			$gradient_stops     = $gradient['stops'] ?? [];
-			$has_gradient_stops = ( is_array( $gradient_stops ) && count( $gradient_stops ) >= 2 ) || is_string( $gradient_stops );
+			$has_gradient_stops = self::_has_renderable_gradient_stops( $gradient_stops );
 
 			if ( $has_gradient_stops ) {
 				$gradient_css = Background::gradient_style_declaration(

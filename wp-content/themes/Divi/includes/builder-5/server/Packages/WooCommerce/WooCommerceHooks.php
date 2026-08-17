@@ -122,6 +122,8 @@ class WooCommerceHooks implements DependencyInterface {
 		remove_action( 'wp_enqueue_scripts', 'et_builder_wc_load_scripts', 15 );
 		// Load WooCommerce related scripts.
 		add_action( 'wp_enqueue_scripts', [ self::class, 'load_scripts' ], 15 );
+		// Ensure Theme Builder partial overrides are available before Woo Coming Soon renders templates.
+		add_action( 'wp', [ self::class, 'register_theme_builder_partials_for_coming_soon' ], 8 );
 
 		// Override WooCommerce product thumbnail template to add et_shop_image wrapper.
 		remove_action( 'woocommerce_before_shop_loop_item_title', 'woocommerce_template_loop_product_thumbnail', 10 );
@@ -255,6 +257,7 @@ class WooCommerceHooks implements DependencyInterface {
 
 		// Ensure WooCommerce Blocks checkout settings are registered for REST API.
 		add_action( 'rest_api_init', [ self::class, 'ensure_woocommerce_checkout_settings_registration' ], 5 );
+		add_filter( 'rest_pre_dispatch', [ WooCommerceUtils::class, 'prime_rest_request_params_on_pre_dispatch' ], 10, 3 );
 
 		// Render Terms & Conditions page content with Theme Builder template when applicable.
 		// WooCommerce uses action hook 'woocommerce_checkout_terms_and_conditions' with function
@@ -268,19 +271,145 @@ class WooCommerceHooks implements DependencyInterface {
 	}
 
 	/**
+	 * Register Theme Builder header/footer partial overrides for Woo Coming Soon requests.
+	 *
+	 * Woo Coming Soon exits early from `template_include` in non-FSE themes, which can bypass
+	 * Theme Builder's own template override wiring. This method pre-registers the same
+	 * header/footer override callbacks so Coming Soon pages can still render inside Divi's
+	 * Theme Builder shell.
+	 *
+	 * @since ??
+	 *
+	 * @return void
+	 */
+	public static function register_theme_builder_partials_for_coming_soon(): void {
+		if ( current_user_can( 'manage_woocommerce' ) ) {
+			return;
+		}
+
+		if ( ! self::is_store_pages_coming_soon_enabled() ) {
+			return;
+		}
+
+		if ( ! self::is_store_page_request() ) {
+			return;
+		}
+
+		if ( ! self::has_theme_builder_header_or_footer_override() ) {
+			return;
+		}
+
+		if (
+			! function_exists( 'et_theme_builder_frontend_override_header' )
+			|| ! function_exists( 'et_theme_builder_frontend_override_footer' )
+		) {
+			return;
+		}
+
+		// Match Divi Theme Builder behavior by preventing default admin bar output in body open.
+		remove_action( 'wp_body_open', 'wp_admin_bar_render', 0 );
+
+		if ( false === has_action( 'get_header', 'et_theme_builder_frontend_override_header' ) ) {
+			add_action( 'get_header', 'et_theme_builder_frontend_override_header' );
+		}
+
+		if ( false === has_action( 'get_footer', 'et_theme_builder_frontend_override_footer' ) ) {
+			add_action( 'get_footer', 'et_theme_builder_frontend_override_footer' );
+		}
+
+		if ( function_exists( 'et_prioritize_deferred_block_css_for_theme_builder' ) ) {
+			et_prioritize_deferred_block_css_for_theme_builder();
+		}
+	}
+
+	/**
+	 * Determine whether WooCommerce "Coming Soon" is enabled for store pages only.
+	 *
+	 * @since ??
+	 *
+	 * @return bool
+	 */
+	private static function is_store_pages_coming_soon_enabled(): bool {
+		$is_coming_soon_enabled = 'yes' === get_option( 'woocommerce_coming_soon', 'no' );
+		$is_store_pages_only    = 'yes' === get_option( 'woocommerce_store_pages_only', 'no' );
+
+		return $is_coming_soon_enabled && $is_store_pages_only;
+	}
+
+	/**
+	 * Determine whether current request targets a WooCommerce store page.
+	 *
+	 * Mirrors WooCommerce's "store pages" scope used by Site Visibility settings.
+	 *
+	 * @since ??
+	 *
+	 * @return bool
+	 */
+	private static function is_store_page_request(): bool {
+		$is_shop             = function_exists( 'is_shop' ) && is_shop();
+		$is_cart             = function_exists( 'is_cart' ) && is_cart();
+		$is_checkout         = function_exists( 'is_checkout' ) && is_checkout();
+		$is_account_page     = function_exists( 'is_account_page' ) && is_account_page();
+		$is_product          = function_exists( 'is_product' ) && is_product();
+		$is_product_category = function_exists( 'is_product_category' ) && is_product_category();
+		$is_product_tag      = function_exists( 'is_product_tag' ) && is_product_tag();
+		$is_product_taxonomy = function_exists( 'is_product_taxonomy' ) && is_product_taxonomy();
+
+		return (
+			$is_shop
+			|| $is_cart
+			|| $is_checkout
+			|| $is_account_page
+			|| $is_product
+			|| $is_product_category
+			|| $is_product_tag
+			|| $is_product_taxonomy
+		);
+	}
+
+	/**
+	 * Determine whether Theme Builder overrides header or footer on current request.
+	 *
+	 * @since ??
+	 *
+	 * @return bool
+	 */
+	private static function has_theme_builder_header_or_footer_override(): bool {
+		if ( ! function_exists( 'et_theme_builder_get_template_layouts' ) ) {
+			return false;
+		}
+
+		$layouts = et_theme_builder_get_template_layouts();
+
+		if ( empty( $layouts ) ) {
+			return false;
+		}
+
+		// Read override flags directly so a partial layouts array (e.g. header-only
+		// test fixtures) cannot trigger undefined-index notices from
+		// et_theme_builder_overrides_layout(), which assumes all layout keys exist.
+		$has_header_override = defined( 'ET_THEME_BUILDER_HEADER_LAYOUT_POST_TYPE' )
+			&& ! empty( $layouts[ ET_THEME_BUILDER_HEADER_LAYOUT_POST_TYPE ]['override'] );
+		$has_footer_override = defined( 'ET_THEME_BUILDER_FOOTER_LAYOUT_POST_TYPE' )
+			&& ! empty( $layouts[ ET_THEME_BUILDER_FOOTER_LAYOUT_POST_TYPE ]['override'] );
+
+		return $has_header_override || $has_footer_override;
+	}
+
+	/**
 	 * Swap the checkout form template for isolated checkout section renders.
 	 *
 	 * @since ??
 	 *
-	 * @param string $template      Template.
-	 * @param string $template_name Template name.
-	 * @param array  $args          Arguments.
-	 * @param string $template_path Template path.
-	 * @param string $default_path  Default path.
+	 * @param string      $template      Template.
+	 * @param string      $template_name Template name.
+	 * @param array       $args          Arguments.
+	 * @param string|null $template_path Template path.
+	 * @param string|null $default_path  Default path.
 	 *
 	 * @return string
 	 */
-	public static function maybe_swap_isolated_checkout_form_template( string $template, string $template_name, array $args, string $template_path, string $default_path ): string { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter -- Filter signature requires all parameters.
+	public static function maybe_swap_isolated_checkout_form_template( string $template, string $template_name, array $args, ?string $template_path = null, ?string $default_path = null ): string { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter -- Filter signature requires all parameters.
 		if ( 'checkout/form-checkout.php' !== $template_name ) {
 			return $template;
 		}
@@ -536,7 +665,7 @@ class WooCommerceHooks implements DependencyInterface {
 
 		// If the current page is not non-`product` CPT which using builder, stop early.
 		if (
-			( ! WooCommerceUtils::is_non_product_post_type() || ! class_exists( 'WC_Frontend_Scripts' ) )
+			! WooCommerceUtils::is_non_product_post_type()
 			&& ! et_core_is_fb_enabled()
 			&& ! $is_shop
 			&& ! $is_checkout
@@ -610,7 +739,13 @@ class WooCommerceHooks implements DependencyInterface {
 		wp_enqueue_script( 'selectWoo' );
 		wp_enqueue_style( 'select2' );
 
-		// Enqueue style.
+		// Enqueue style. WC_Frontend_Scripts::get_styles() may not be available in all
+		// environments (e.g. when WooCommerce frontend includes are not loaded), so guard
+		// the call explicitly rather than relying on the upstream page-type gate above.
+		if ( ! class_exists( 'WC_Frontend_Scripts' ) ) {
+			return;
+		}
+
 		$wc_styles = WC_Frontend_Scripts::get_styles();
 
 		/*
@@ -1009,7 +1144,7 @@ class WooCommerceHooks implements DependencyInterface {
 		// Gets Parent theme's info in case child theme is used.
 		$page_title_block = '';
 		if ( 'Extra' !== et_core_get_theme_info( 'Name' ) ) {
-			$page_title_block = '<!-- wp:divi/post-title {"meta":{"advanced":{"showMeta":{"desktop":{"value":"off"}}}},"featuredImage":{"advanced":{"enabled":{"desktop":{"value":"off"}}}}} --><!-- /wp:divi/post-title -->';
+			$page_title_block = '<!-- wp:divi/post-title {"meta":{"advanced":{"showMeta":{"desktop":{"value":"off"}}}},"image":{"advanced":{"enabled":{"desktop":{"value":"off"}}}}} --><!-- /wp:divi/post-title -->';
 		}
 
 		// Pre-converted content from shortcode to Gutenberg block format.
@@ -1035,7 +1170,7 @@ class WooCommerceHooks implements DependencyInterface {
 		// Gets Parent theme's info in case child theme is used.
 		$page_title_block = '';
 		if ( 'Extra' !== et_core_get_theme_info( 'Name' ) ) {
-			$page_title_block = '<!-- wp:divi/post-title {"meta":{"advanced":{"showMeta":{"desktop":{"value":"off"}}}},"featuredImage":{"advanced":{"enabled":{"desktop":{"value":"off"}}}}} --><!-- /wp:divi/post-title -->';
+			$page_title_block = '<!-- wp:divi/post-title {"meta":{"advanced":{"showMeta":{"desktop":{"value":"off"}}}},"image":{"advanced":{"enabled":{"desktop":{"value":"off"}}}}} --><!-- /wp:divi/post-title -->';
 		}
 
 		// Pre-converted content from shortcode to Gutenberg block format.

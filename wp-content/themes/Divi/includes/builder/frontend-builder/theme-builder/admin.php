@@ -255,11 +255,11 @@ function et_theme_builder_set_app_color_mode() {
 		return;
 	}
 
-	// Load Divi 5 appColorMode preference directly from database option.
-	// Divi 5 saves this as 'et_fb_pref_app_color_mode' using the mapping key 'app_color_mode'.
-	$color_mode = et_get_option( 'et_fb_pref_app_color_mode', 'light', '', true );
+	// Resolve interface mode from the default Builder Settings workspace (#50391).
+	$color_mode = class_exists( '\ET\Builder\VisualBuilder\Workspace\Workspace' )
+		? \ET\Builder\VisualBuilder\Workspace\Workspace::get_default_app_color_mode()
+		: et_get_option( 'et_fb_pref_app_color_mode', 'light', '', true );
 
-	// Ensure valid color mode value (only 'light' or 'dark' are valid).
 	if ( 'dark' !== $color_mode ) {
 		$color_mode = 'light';
 	}

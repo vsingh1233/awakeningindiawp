@@ -257,8 +257,8 @@ class Conversion {
 			$moduleAttrsConversionMap['nonResponsiveAttributes'] = array_merge( $moduleAttrsConversionMap['nonResponsiveAttributes'], $conversionOutline['nonResponsiveAttributes'] );
 		}
 
-		// Set deprecated attributes map if provided in conversion outline
-		if (isset($conversionOutline['deprecatedMap'])) {
+		// Set deprecated attributes map if provided in conversion outline.
+		if ( isset( $conversionOutline['deprecatedMap'] ) ) {
 			$moduleAttrsConversionMap['deprecatedMap'] = $conversionOutline['deprecatedMap'];
 		}
 
@@ -989,6 +989,7 @@ class Conversion {
 
 		$valueExpansionFunctionMapping = [
 			'convertFontIcon'               => 'ET\Builder\Packages\Conversion\ValueExpansion::convertFontIcon',
+			'convertBodyFont'               => 'ET\Builder\Packages\Conversion\ValueExpansion::convertBodyFont',
 			'convertIcon'                   => 'ET\Builder\Packages\Conversion\ValueExpansion::convertIcon',
 			'convertInlineFont'             => 'ET\Builder\Packages\Conversion\ValueExpansion::convertInlineFont',
 			'convertSpacing'                => 'ET\Builder\Packages\Conversion\ValueExpansion::convertSpacing',
@@ -1008,6 +1009,7 @@ class Conversion {
 			'convertLegacyGradientProperty' => 'ET\Builder\Packages\Conversion\ValueExpansion::convertLegacyGradientProperty',
 			'convertSpamProviderAccount'    => 'ET\Builder\Packages\Conversion\ValueExpansion::convertSpamProviderAccount',
 			'convertTextColorValue'         => 'ET\Builder\Packages\Conversion\ValueExpansion::convertTextColorValue',
+			'convertToggleTitleTextColor'   => 'ET\Builder\Packages\Conversion\ValueExpansion::convertToggleTitleTextColor',
 			'conditionalLogicConverter'     => 'ET\Builder\Packages\Conversion\ValueExpansion::conditionalLogicConverter',
 		];
 
@@ -1230,14 +1232,8 @@ class Conversion {
 
 		$fullAttributePath = str_replace('*', "{$viewport}.{$state}", $attrNameConversionMap);
 
-		// error_log('$moduleConversionMap[\'valueExpansionFunctionMap\']...');
-		// error_log('$moduleConversionMap[\'valueExpansionFunctionMap\']' .  print_r($moduleConversionMap['valueExpansionFunctionMap'], true));
-		// error_log('$desktopName: ' . $desktopName);
-
 		if (isset($moduleConversionMap['valueExpansionFunctionMap'][$desktopName])) {
 			$valueExpansionFunction = $moduleConversionMap['valueExpansionFunctionMap'][$desktopName];
-
-			// error_log('$valueExpansionFunction: ' . print_r($valueExpansionFunction, true));
 
 			// There are two possible ways this value will show up as:
 			// 1. its already a callable
@@ -1523,16 +1519,19 @@ class Conversion {
 		return $encodedAttrs;
 	}
 
-	static function convertShortcodeToGbFormat( $shortcodePart, $gbReset = true, $globalID = null, $postId = null, $isFirstLevel = true, $parentAttrs = null, bool $is_ab_testing_active = false ) {
+	static function convertShortcodeToGbFormat( $shortcodePart, $gbReset = true, $globalID = null, $postId = null, $isFirstLevel = true, $parentAttrs = null, bool $is_ab_testing_active = false, bool $convert_global_instances_as_regular_modules = false ) {
 		static $gbString = '';
 		static $convertibleModulesSlug = null;
 		static $moduleCollections = null;
 
 		if ($gbReset) {
 			$gbString = '';
+			// Ensure top-level conversion uses the latest registered modules map.
+			$convertibleModulesSlug = null;
+			$moduleCollections      = null;
 		}
 
-		if (null === $moduleCollections) {
+		if (null === $moduleCollections || null === $convertibleModulesSlug) {
 			$moduleCollections      = self::getModuleCollections();
 			$convertibleModulesSlug = [];
 
@@ -1553,65 +1552,73 @@ class Conversion {
 				$nonconvertible = 'yes';
 			}
 
-			$content        = is_string($element['content']) && $element['content'] !== '' ? $element['content'] : null;
-			// phpcs:ignore Universal.Operators.DisallowShortTernary.Found -- Short ternary is appropriate here for fallback to global_module attribute.
-			$globalModuleID = $globalID ?: (isset($element['attrs']['global_module']) ? $element['attrs']['global_module'] : null);
+			$content = is_string($element['content']) && $element['content'] !== '' ? $element['content'] : null;
 
-			// Check if this element already has global_parent in D4 shortcode.
-			$has_global_parent_attr = isset($element['attrs']['global_parent']);
-
-			// Handle global module instance conversion to divi/global-layout placeholder.
-			$isGlobalModuleInstance = ! empty( $globalModuleID ) && empty( $globalID );
-
-				if ( $isGlobalModuleInstance ) {
-				// Convert to divi/global-layout placeholder with local attributes.
-				// Remove global_module from attrs before conversion.
-				$instanceAttrs = $element['attrs'];
-				unset( $instanceAttrs['global_module'] );
-				unset( $instanceAttrs['saved_tabs'] ); // Don't convert saved_tabs to instance.
-
-				// Convert instance attributes to D5 format.
-				$convertedAttrs = self::convertAttrs( $instanceAttrs, $moduleName, $content, false, $is_ab_testing_active );
-
-				// Build placeholder attributes.
-				$placeholderAttrs = [
-					'globalModule' => $globalModuleID,
-					'blockName'    => $moduleName,
-				];
-
-				// Add localAttrs if instance has any local overrides.
-				if ( ! empty( $convertedAttrs ) ) {
-						$placeholderAttrs['localAttrs'] = $convertedAttrs;
-				}
-
-				$encodedAttrs = serialize_block_attributes( $placeholderAttrs );
-				$gbString    .= "<!-- wp:divi/global-layout {$encodedAttrs} --><!-- /wp:divi/global-layout -->";
-
-				// Skip further processing for this module.
-				continue;
-			}
-
-			// if $element[\'attrs\'] is empty, set it to an empty array
+			// if $element['attrs'] is empty, set it to an empty array
 			// this can occur if the shortcode has 0 attributes, e.g. [et_pb_accordion][et_pb_accordion_item something="blah...
-			if ( ! isset( $element['attrs'] ) || '' === $element['attrs']) {
+			if ( ! isset( $element['attrs'] ) || '' === $element['attrs'] ) {
 				$element['attrs'] = [];
 			}
 
-		// Only add global_parent if we're in a global template context (globalID set)
-		// AND we're not at the first level (root module shouldn't have globalParent).
-		$should_add_global_parent = !empty($globalID) && !$isFirstLevel;
-		$attrs = array_merge($element['attrs'], $should_add_global_parent ? [ 'global_parent' => $globalModuleID ] : []);
+			// Portability import deglobalizes all global references in the inline D4 tree.
+			if ( $convert_global_instances_as_regular_modules && isset( $element['attrs']['global_parent'] ) ) {
+				unset( $element['attrs']['global_parent'] );
+			}
 
-		$encodedAttrs = self::encodeAttrs(
-			$attrs,
-			$moduleName,
-			$content,
-			$element['originalShortcode'] ?? null,
-			$element['name'] ?? null,
-			$postId,
-			$parentAttrs,
-			$is_ab_testing_active
-		);
+			// phpcs:ignore Universal.Operators.DisallowShortTernary.Found -- Short ternary is appropriate here for fallback to global_module attribute.
+			$globalModuleID = $globalID ?: (isset($element['attrs']['global_module']) ? $element['attrs']['global_module'] : null);
+
+			// Handle global module instance conversion.
+			$isGlobalModuleInstance = ! empty( $globalModuleID ) && empty( $globalID );
+
+			if ( $isGlobalModuleInstance ) {
+				if ( $convert_global_instances_as_regular_modules ) {
+					// Portability import: deglobalize and convert the full inline tree as regular modules.
+					unset( $element['attrs']['global_module'] );
+					unset( $element['attrs']['saved_tabs'] );
+					$globalModuleID         = null;
+					$isGlobalModuleInstance = false;
+				} else {
+					// On-site migration: convert to self-closing divi/global-layout placeholder.
+					$instanceAttrs = $element['attrs'];
+					unset( $instanceAttrs['global_module'] );
+					unset( $instanceAttrs['saved_tabs'] ); // Don't convert saved_tabs to instance.
+					unset( $instanceAttrs['nonconvertible'] ); // Internal conversion metadata, not a user-set override.
+					unset( $instanceAttrs['shortcodeName'] ); // Internal conversion metadata, not a user-set override.
+
+					$convertedAttrs = self::convertAttrs( $instanceAttrs, $moduleName, $content, false, $is_ab_testing_active );
+
+					$placeholderAttrs = [
+						'globalModule' => $globalModuleID,
+						'blockName'    => $moduleName,
+					];
+
+					if ( ! empty( $convertedAttrs ) ) {
+						$placeholderAttrs['localAttrs'] = $convertedAttrs;
+					}
+
+					$encodedAttrs = serialize_block_attributes( $placeholderAttrs );
+					$gbString    .= "<!-- wp:divi/global-layout {$encodedAttrs} --><!-- /wp:divi/global-layout -->";
+
+					continue;
+				}
+			}
+
+			// Only add global_parent if we're in a global template context (globalID set)
+			// AND we're not at the first level (root module shouldn't have globalParent).
+			$should_add_global_parent = !empty($globalID) && !$isFirstLevel;
+			$attrs = array_merge($element['attrs'], $should_add_global_parent ? [ 'global_parent' => $globalModuleID ] : []);
+
+			$encodedAttrs = self::encodeAttrs(
+				$attrs,
+				$moduleName,
+				$content,
+				$element['originalShortcode'] ?? null,
+				$element['name'] ?? null,
+				$postId,
+				$parentAttrs,
+				$is_ab_testing_active
+			);
 
 			// If module contains unknownAttributes, this means that some attributes
 			// may be added by Divi 4 third-party plugin, so we should skip conversion in this case.
@@ -1623,25 +1630,23 @@ class Conversion {
 				$element['content'] = $element['originalShortcode'];
 			}
 
-		// if $encodedAttrs is an empty array, set it to ''
-		$encodedAttrs = $encodedAttrs === '[]' ? '' : $encodedAttrs;
+			// if $encodedAttrs is an empty array, set it to ''
+			$encodedAttrs = $encodedAttrs === '[]' ? '' : $encodedAttrs;
 
-		if ( is_array( $element['content'] ) ) {
+			if ( is_array( $element['content'] ) ) {
 				$gbString .= "<!-- wp:{$moduleName} {$encodedAttrs} -->";
 
 				// Pass parent attrs to children for slider modules so slide children can inherit text_orientation.
 				$slider_parent_shortcodes = [ 'et_pb_slider', 'et_pb_fullwidth_slider', 'et_pb_post_slider', 'et_pb_fullwidth_post_slider' ];
 				$child_parent_attrs       = in_array( $element['name'], $slider_parent_shortcodes, true ) ? $element['attrs'] : null;
 
-				self::convertShortcodeToGbFormat( $element['content'], false, $globalModuleID, $postId, false, $child_parent_attrs, $is_ab_testing_active );
+				self::convertShortcodeToGbFormat( $element['content'], false, $globalModuleID, $postId, false, $child_parent_attrs, $is_ab_testing_active, $convert_global_instances_as_regular_modules );
 				$gbString .= "<!-- /wp:{$moduleName} -->";
 			} elseif ($nonconvertible === 'yes') {
 				$gbString .= "<!-- wp:{$moduleName} {$encodedAttrs} -->{$element['content']}<!-- /wp:{$moduleName} -->";
 			} else {
 				$gbString .= "<!-- wp:{$moduleName} {$encodedAttrs} --><!-- /wp:{$moduleName} -->";
 			}
-
-			// error_log('$attrs: ' . print_r($encodedAttrs, true));
 		}
 
 		return $gbString;
@@ -1649,16 +1654,20 @@ class Conversion {
 
 	static function getModuleCollections() {
 		static $moduleCollections = null;
+		static $registered_modules_count = null;
 
-		if (null !== $moduleCollections) {
-			return $moduleCollections;
-		}
+		$current_registered_modules_count = 0;
 
 		// Ensure shortcode framework is initialized so 3rd-party modules
 		// are registered in the block registry before the conversion map is built.
 		self::initialize_shortcode_framework();
 
-		$all_registered_modules = \WP_Block_Type_Registry::get_instance()->get_all_registered();
+		$all_registered_modules          = \WP_Block_Type_Registry::get_instance()->get_all_registered();
+		$current_registered_modules_count = count( $all_registered_modules );
+
+		if ( null !== $moduleCollections && $registered_modules_count === $current_registered_modules_count ) {
+			return $moduleCollections;
+		}
 
 		// $moduleCollections = [
 		//  [
@@ -1742,6 +1751,7 @@ class Conversion {
 		 *                                 - 'childrenName' (string, optional): The children module name if applicable
 		 */
 		$moduleCollections = apply_filters( 'divi.moduleLibrary.conversion.moduleCollections', $moduleCollections );
+		$registered_modules_count = $current_registered_modules_count;
 
 		return $moduleCollections;
 	}
@@ -1757,9 +1767,10 @@ class Conversion {
 	 * @param string $content_raw The content to be converted.
 	 * @param bool $run_migration Whether to run the migration.
 	 * @param int|null $post_id Optional post ID for context (used for global module selective sync).
+	 * @param bool $convert_global_instances_as_regular_modules Whether to convert global module instances as regular modules during portability import.
 	 * @return string The converted content.
 	 */
-	static function maybeConvertContent($content_raw, $run_migration = true, $post_id = null) {
+	static function maybeConvertContent( $content_raw, $run_migration = true, $post_id = null, bool $convert_global_instances_as_regular_modules = false ) {
 		// Maybe convert global colors data.
 		GlobalData::maybe_convert_global_colors_data();
 
@@ -1816,7 +1827,8 @@ class Conversion {
 				$post_id,
 				true,
 				null,
-				$is_ab_testing_active
+				$is_ab_testing_active,
+				$convert_global_instances_as_regular_modules
 			);
 
 			// Wrap global layout templates in placeholder block.
@@ -1844,7 +1856,8 @@ class Conversion {
 						$post_id,
 						true,
 						null,
-						$is_ab_testing_active
+						$is_ab_testing_active,
+						$convert_global_instances_as_regular_modules
 					);
 				} else {
 					// Preserve non-layout blocks using WordPress serializer to keep valid block syntax.
@@ -1853,7 +1866,7 @@ class Conversion {
 				}
 			}
 		} else if (strpos($content, 'divi/shortcode-module') !== false) {
-			$converted = self::convertShortcodeModulesInD5Content($content, $moduleCollections);
+			$converted = self::convertShortcodeModulesInD5Content( $content, $moduleCollections, $convert_global_instances_as_regular_modules );
 		}
 
 		return $converted;
@@ -1866,9 +1879,10 @@ class Conversion {
 	 *
 	 * @param string $content D5 content containing shortcode-module blocks
 	 * @param array $moduleCollections Available module collections
+	 * @param bool $convert_global_instances_as_regular_modules Whether to convert global module instances as regular modules during portability import.
 	 * @return string Converted content with shortcode-modules replaced by proper D5 blocks
 	 */
-	static function convertShortcodeModulesInD5Content($content, $moduleCollections) {
+	static function convertShortcodeModulesInD5Content( $content, $moduleCollections, bool $convert_global_instances_as_regular_modules = false ) {
 		// Initialize shortcode framework to ensure third-party modules are loaded
 		self::initialize_shortcode_framework();
 
@@ -1892,7 +1906,7 @@ class Conversion {
 		foreach ($blockObjects as $index => $block) {
 			$blockName = $block['blockName'] ?? 'null';
 
-			$processedBlock = self::processBlockRecursively($block, $moduleCollections, $shortcodeModuleCount);
+			$processedBlock = self::processBlockRecursively( $block, $moduleCollections, $shortcodeModuleCount, $convert_global_instances_as_regular_modules );
 			$converted      .= $processedBlock;
 		}
 
@@ -1913,24 +1927,25 @@ class Conversion {
 	 * @param array $block               Block to process
 	 * @param array $moduleCollections   Available module collections
 	 * @param int &$shortcodeModuleCount Reference to shortcode module counter
+	 * @param bool $convert_global_instances_as_regular_modules Whether to convert global module instances as regular modules during portability import.
 	 *
 	 * @return string Processed block content
 	 */
-	static function processBlockRecursively(array $block, array $moduleCollections, int &$shortcodeModuleCount): string {
+	static function processBlockRecursively( array $block, array $moduleCollections, int &$shortcodeModuleCount, bool $convert_global_instances_as_regular_modules = false ): string {
 		$blockName = $block['blockName'] ?? 'null';
 
 		if ('divi/shortcode-module' === $block['blockName']) {
 			// Found a shortcode-module, process it
 			++$shortcodeModuleCount;
 
-			return self::processShortcodeModuleBlock($block, $moduleCollections, $shortcodeModuleCount);
+			return self::processShortcodeModuleBlock( $block, $moduleCollections, $shortcodeModuleCount, $convert_global_instances_as_regular_modules );
 
 		} else if ( ! empty($block['innerBlocks'])) {
 			// Block has nested blocks, process them recursively
 			$processedInnerContent = '';
 
 			foreach ($block['innerBlocks'] as $innerBlock) {
-				$processedInnerContent .= self::processBlockRecursively($innerBlock, $moduleCollections, $shortcodeModuleCount);
+				$processedInnerContent .= self::processBlockRecursively( $innerBlock, $moduleCollections, $shortcodeModuleCount, $convert_global_instances_as_regular_modules );
 			}
 
 			// Reconstruct the parent block with processed inner content
@@ -1956,7 +1971,7 @@ class Conversion {
 	/**
 	 * Process a single shortcode-module block
 	 */
-	static function processShortcodeModuleBlock($block, $moduleCollections, $count) {
+	static function processShortcodeModuleBlock( $block, $moduleCollections, $count, bool $convert_global_instances_as_regular_modules = false ) {
 		static $convertibleShortcodes = null;
 
 		$shortcodeContent = trim($block['innerHTML']);
@@ -1975,7 +1990,7 @@ class Conversion {
 		if ($isConvertible) {
 			// Use existing conversion system to convert the shortcode
 			$parsedShortcode    = self::parseShortcode($shortcodeContent, $moduleCollections);
-			$convertedShortcode = self::convertShortcodeToGbFormat($parsedShortcode);
+			$convertedShortcode = self::convertShortcodeToGbFormat( $parsedShortcode, true, null, null, true, null, false, $convert_global_instances_as_regular_modules );
 
 			return $convertedShortcode;
 
@@ -2053,7 +2068,7 @@ class Conversion {
 
 	static function generateNonconvertibleAttributes($allAttrs, $shortcodeName, $nonconvertible) {
 		// Define allowed attributes
-		$allowedAttributes = [ '_builder_version', '_module_preset', 'nonconvertible' ];
+		$allowedAttributes = [ '_builder_version', '_module_preset', 'nonconvertible', 'global_module', 'global_parent' ];
 
 		// Strip all unwanted attributes from unsupported module
 		$attributes = array_intersect_key($allAttrs, array_flip($allowedAttributes));
@@ -2904,7 +2919,6 @@ class Conversion {
 			}
 		}
 
-		// error_log('$attrs: ' . print_r($attrs, true));
 
 		foreach ($attrs as $name => $value) {
 			// error_log('name: ' . $name);

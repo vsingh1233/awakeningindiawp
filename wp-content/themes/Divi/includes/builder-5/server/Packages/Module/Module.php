@@ -547,6 +547,12 @@ class Module {
 			$html_attrs['data-loop-item'] = $loop_iteration;
 		}
 
+		$loop_source_id = $attrs['__loop_source_id'] ?? null;
+
+		if ( is_string( $loop_source_id ) && '' !== $loop_source_id ) {
+			$html_attrs['data-loop-source'] = $loop_source_id;
+		}
+
 		// Module CSS Class.
 		$classnames_instance->add(
 			$html_classnames,
@@ -1594,7 +1600,16 @@ class Module {
 			$should_render_inline    = ! $is_style_enqueued_as_static_css || $is_inside_sticky_module;
 			if ( $should_render_inline && ! $is_selector_processed ) {
 				$preset_item_attrs_raw = $preset_item->get_data_attrs();
-				$preset_item_attrs     = ModuleUtils::remove_matching_values( $preset_item_attrs_raw, $default_printed_style_attrs );
+
+				if ( ModuleUtils::module_preset_merges_style_attrs( $name ) ) {
+					$preset_item_style_attrs = $preset_item->get_data_style_attrs();
+
+					if ( ! empty( $preset_item_style_attrs ) ) {
+						$preset_item_attrs_raw = array_replace_recursive( $preset_item_attrs_raw, $preset_item_style_attrs );
+					}
+				}
+
+				$preset_item_attrs = ModuleUtils::remove_matching_values( $preset_item_attrs_raw, $default_printed_style_attrs );
 
 				// Set preset attributes as the attributes data that are used by the ModuleElements instance during the styles rendering.
 				if ( $elements instanceof ModuleElements ) {

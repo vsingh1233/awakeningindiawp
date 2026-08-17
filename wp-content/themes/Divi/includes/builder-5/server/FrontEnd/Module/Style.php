@@ -948,7 +948,8 @@ class Style {
 					$value = (int) $matches[2];
 
 					// Return a calculated priority: max-width sorted descending, min-width ascending.
-					$media_priorities[ $key ] = 'max' === $type ? -$value : $value + PHP_INT_MAX;
+					// Use signed magnitudes only — adding PHP_INT_MAX collapses nearby min-width values as floats.
+					$media_priorities[ $key ] = 'max' === $type ? -$value : $value;
 				} else {
 					// Default for unknown media queries.
 					$media_priorities[ $key ] = PHP_INT_MAX;

@@ -66,6 +66,7 @@
     "open_use_icon_font_size": "openToggleIcon.decoration.icon.*.useSize",
     "open_icon_font_size": "openToggleIcon.decoration.icon.*.size",
     "closed_toggle_text_color": "closedTitle.decoration.font.font.*.color",
+    "title_text_color": "closedTitle.decoration.font.font.*.color",
     "title_level": "title.decoration.font.font.*.headingLevel",
     "open_toggle_text_color": "openToggle.decoration.font.font.*.color",
     "inline_fonts": "content.decoration.inlineFont.*.families"
@@ -73,6 +74,7 @@
   "valueExpansionFunctionMap": {
     "open_toggle_icon": "convertFontIcon",
     "toggle_icon": "convertFontIcon",
-    "inline_fonts": "convertInlineFont"
+    "inline_fonts": "convertInlineFont",
+    "title_text_color": "convertToggleTitleTextColor"
   }
 }

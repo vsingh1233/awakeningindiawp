@@ -135,6 +135,33 @@ class WooCommerceUtils {
 	private static $_current_rest_request_query_params = [];
 
 	/**
+	 * Cached product ID resolutions keyed by product selector.
+	 *
+	 * @since ??
+	 *
+	 * @var array<string, int>
+	 */
+	private static $_product_id_by_prop_cache = [];
+
+	/**
+	 * Cached WooCommerce product objects keyed by product ID.
+	 *
+	 * @since ??
+	 *
+	 * @var array<int, \WC_Product|false>
+	 */
+	private static $_product_object_cache = [];
+
+	/**
+	 * Force product resolution caching during tests.
+	 *
+	 * @since ??
+	 *
+	 * @var bool
+	 */
+	private static $_force_product_resolution_cache = false;
+
+	/**
 	 * Nesting depth for isolated checkout section renders.
 	 *
 	 * When greater than zero, checkout modules should reuse the shared
@@ -145,6 +172,20 @@ class WooCommerceUtils {
 	 * @var int
 	 */
 	private static $_isolated_checkout_section_render_depth = 0;
+
+	/**
+	 * Static cache for is_non_product_post_type() result.
+	 *
+	 * Stored as a class property (not a function-local static) so tests can
+	 * reset it via ReflectionProperty::setValue(), which works on PHP 7.4+.
+	 * Function-local statics require ReflectionMethod::setStaticVariable(),
+	 * which is only available on PHP 8.1+.
+	 *
+	 * @since ??
+	 *
+	 * @var bool|null
+	 */
+	private static $_is_non_product_post_type_cache = null;
 
 	/**
 	 * Mark the current checkout render as an isolated section render.
@@ -204,17 +245,15 @@ class WooCommerceUtils {
 	 * @return bool
 	 */
 	public static function is_non_product_post_type(): bool {
-		static $is_non_product_post_type;
-
 		// If the result is already cached, return it immediately.
-		if ( null !== $is_non_product_post_type ) {
-			return $is_non_product_post_type;
+		if ( null !== self::$_is_non_product_post_type_cache ) {
+			return self::$_is_non_product_post_type_cache;
 		}
 
 		// Bail early for specific request types (e.g., AJAX requests, REST API requests, or VB top window requests).
 		if ( Conditions::is_ajax_request() || Conditions::is_rest_api_request() || Conditions::is_vb_top_window() ) {
-			$is_non_product_post_type = false;
-			return $is_non_product_post_type;
+			self::$_is_non_product_post_type_cache = false;
+			return self::$_is_non_product_post_type_cache;
 		}
 
 		// Check if the current post uses the Theme Builder Body layout.
@@ -234,8 +273,8 @@ class WooCommerceUtils {
 
 			// If Theme Builder has WooCommerce modules, return true immediately (handles archive pages).
 			if ( $has_woocommerce_module_tb ) {
-				$is_non_product_post_type = true;
-				return $is_non_product_post_type;
+				self::$_is_non_product_post_type_cache = true;
+				return self::$_is_non_product_post_type_cache;
 			}
 		}
 
@@ -244,14 +283,14 @@ class WooCommerceUtils {
 		// If the global $post is a WooCommerce 'product', immediately return false.
 		// Note: Empty $post check removed here since Theme Builder check already handled archive pages.
 		if ( ! empty( $post ) && 'product' === $post->post_type ) {
-			$is_non_product_post_type = false;
-			return $is_non_product_post_type;
+			self::$_is_non_product_post_type_cache = false;
+			return self::$_is_non_product_post_type_cache;
 		}
 
 		// If $post is empty and Theme Builder didn't have modules, return false.
 		if ( empty( $post ) ) {
-			$is_non_product_post_type = false;
-			return $is_non_product_post_type;
+			self::$_is_non_product_post_type_cache = false;
+			return self::$_is_non_product_post_type_cache;
 		}
 
 		// Check whether the current post uses the builder or layout block.
@@ -266,9 +305,9 @@ class WooCommerceUtils {
 
 		// Final decision: consider TB Body override and its content as valid builder/context,
 		// along with post-level builder/layout and WooCommerce modules.
-		$is_non_product_post_type = ( ( $is_builder_or_layout_used || $tb_body_override ) && ( $has_woocommerce_module || $has_woocommerce_module_tb ) );
+		self::$_is_non_product_post_type_cache = ( ( $is_builder_or_layout_used || $tb_body_override ) && ( $has_woocommerce_module || $has_woocommerce_module_tb ) );
 
-		return $is_non_product_post_type;
+		return self::$_is_non_product_post_type_cache;
 	}
 
 	/**
@@ -912,20 +951,18 @@ class WooCommerceUtils {
 	 * @return int The determined product ID. Returns 0 if no valid product can be resolved.
 	 */
 	public static function get_product_id_by_prop( string $valid_product_attr ): int {
-		static $cache = [];
-
 		// Normalize dynamic placeholder to defaults.
 		if ( 'dynamic' === $valid_product_attr ) {
 			$valid_product_attr = self::get_default_product();
 		}
 
 		// Return the cached result if available.
-		if ( isset( $cache[ $valid_product_attr ] ) && ! Conditions::is_test_env() ) {
-			return $cache[ $valid_product_attr ];
+		if ( isset( self::$_product_id_by_prop_cache[ $valid_product_attr ] ) && self::should_use_product_resolution_cache() ) {
+			return self::$_product_id_by_prop_cache[ $valid_product_attr ];
 		}
 
 		if ( ! self::is_product_attr_valid( $valid_product_attr ) ) {
-			$cache[ $valid_product_attr ] = 0;
+			self::$_product_id_by_prop_cache[ $valid_product_attr ] = 0;
 			return 0;
 		}
 
@@ -995,7 +1032,7 @@ class WooCommerceUtils {
 		}
 
 		// Cache the result before returning.
-		$cache[ $valid_product_attr ] = $product_id;
+		self::$_product_id_by_prop_cache[ $valid_product_attr ] = $product_id;
 
 		return $product_id;
 	}
@@ -1021,29 +1058,27 @@ class WooCommerceUtils {
 	 *                           or false if no valid product can be found.
 	 */
 	public static function get_product( string $maybe_product_id ) {
-		static $cache = [];
-
 		$product_id = self::get_product_id_by_prop( $maybe_product_id );
 
 		// Return a cached product if available.
-		if ( isset( $cache[ $product_id ] ) && ! Conditions::is_test_env() ) {
-			return $cache[ $product_id ];
+		if ( isset( self::$_product_object_cache[ $product_id ] ) && self::should_use_product_resolution_cache() ) {
+			return self::$_product_object_cache[ $product_id ];
 		}
 
 		if ( ! function_exists( 'wc_get_product' ) ) {
-			$cache[ $product_id ] = false;
+			self::$_product_object_cache[ $product_id ] = false;
 			return false;
 		}
 
 		$product = wc_get_product( $product_id );
 
 		if ( empty( $product ) ) {
-			$cache[ $product_id ] = false;
+			self::$_product_object_cache[ $product_id ] = false;
 			return false;
 		}
 
 		// Cache the product object before returning.
-		$cache[ $product_id ] = $product;
+		self::$_product_object_cache[ $product_id ] = $product;
 
 		return $product;
 	}
@@ -2266,6 +2301,88 @@ class WooCommerceUtils {
 	}
 
 	/**
+	 * Whether product resolution results should be cached for this request.
+	 *
+	 * @since ??
+	 *
+	 * @return bool
+	 */
+	private static function should_use_product_resolution_cache(): bool {
+		return self::$_force_product_resolution_cache || ! Conditions::is_test_env();
+	}
+
+	/**
+	 * Reset cached product resolution results.
+	 *
+	 * @since ??
+	 *
+	 * @return void
+	 */
+	public static function reset_product_resolution_caches(): void {
+		self::$_product_id_by_prop_cache = [];
+		self::$_product_object_cache      = [];
+	}
+
+	/**
+	 * Enable product resolution caching during tests.
+	 *
+	 * @since ??
+	 *
+	 * @return void
+	 */
+	public static function enable_product_resolution_cache_for_tests(): void {
+		self::$_force_product_resolution_cache = true;
+	}
+
+	/**
+	 * Disable forced product resolution caching during tests.
+	 *
+	 * @since ??
+	 *
+	 * @return void
+	 */
+	public static function disable_product_resolution_cache_for_tests(): void {
+		self::$_force_product_resolution_cache = false;
+	}
+
+	/**
+	 * Store REST request params and reset product resolution caches.
+	 *
+	 * @since ??
+	 *
+	 * @param WP_REST_Request $request REST request object.
+	 *
+	 * @return void
+	 */
+	public static function prime_current_rest_request_params( WP_REST_Request $request ): void {
+		if ( ! $request instanceof WP_REST_Request ) {
+			return;
+		}
+
+		self::$_current_rest_request_query_params = $request->get_params();
+		self::reset_product_resolution_caches();
+	}
+
+	/**
+	 * Prime WooCommerce module REST params before permission checks run.
+	 *
+	 * @since ??
+	 *
+	 * @param mixed            $result  Response to replace the requested version with, or null to continue.
+	 * @param \WP_REST_Server  $server  Server instance.
+	 * @param WP_REST_Request  $request Request used to generate the response.
+	 *
+	 * @return mixed
+	 */
+	public static function prime_rest_request_params_on_pre_dispatch( $result, $server, $request ) {
+		if ( $request instanceof WP_REST_Request && 0 === strpos( (string) $request->get_route(), '/divi/v1/module-data/woocommerce/' ) ) {
+			self::prime_current_rest_request_params( $request );
+		}
+
+		return $result;
+	}
+
+	/**
 	 * Validate the product ID.
 	 *
 	 * Validates the given product ID.
@@ -2346,7 +2463,7 @@ class WooCommerceUtils {
 		// Set the current REST request query params for ALL WooCommerce modules.
 		// This ensures Cart, Checkout, and Product modules all have access to query parameters.
 		if ( $request instanceof WP_REST_Request ) {
-			self::$_current_rest_request_query_params = $request->get_params();
+			self::prime_current_rest_request_params( $request );
 		}
 
 		$missing_params = [];
