@@ -79,7 +79,12 @@ header .ai-header-utility.et_pb_section { background: oklch(30.12% 0.0562 276.88
 .ai-header-utility__social-labels p > span { display: none; }
 .ai-header-utility__social-labels, .ai-header-utility__social-labels .et_pb_text_inner { width: 100%; }
 .ai-header-utility__social-labels p { margin-left: auto; text-align: right; word-spacing: 20px; }
-header .ai-header-primary.et_pb_section { backdrop-filter: blur(12px); background: oklch(97.08% 0.0086 84.57 / 85%); border-bottom: 1px solid oklch(88.79% 0.0125 84.58); height: 5rem !important; max-height: 5rem; min-height: 5rem; padding: 0 !important; position: relative; z-index: 999; }
+/* The blur lives on a pseudo-element: backdrop-filter on the section itself would
+   make it the containing block for the position:fixed mobile menu overlay, collapsing
+   that overlay to the 5rem header height. Matches React, where the blurred bar and the
+   full-bleed mobile panel are siblings. */
+header .ai-header-primary.et_pb_section { background: transparent; border-bottom: 1px solid oklch(88.79% 0.0125 84.58); height: 5rem !important; max-height: 5rem; min-height: 5rem; padding: 0 !important; position: relative; z-index: 999; }
+header .ai-header-primary.et_pb_section::before { backdrop-filter: blur(12px); background: oklch(97.08% 0.0086 84.57 / 85%); content: ""; inset: 0; pointer-events: none; position: absolute; z-index: -1; }
 .ai-header-primary__row { align-items: center; height: 5rem; min-height: 5rem; padding-block: 0 !important; }
 .ai-header-primary__nav { align-items: center; display: flex !important; flex-direction: row !important; gap: 16px; }
 header .ai-site-header__menu.et_pb_menu { background: transparent; }
@@ -479,14 +484,15 @@ header + main + .et-l--footer .ai-site-footer,
   .ai-site-header__menu .et_mobile_nav_menu { align-items: center; display: flex; height: 2.75rem; justify-content: flex-end; position: absolute; right: -1rem; top: 6.40625px; width: 2.75rem; }
   .ai-site-header__menu .mobile_nav, .ai-site-header__menu .mobile_menu_bar { display: block; height: 2.75rem; min-height: 2.75rem; min-width: 2.75rem; position: relative; width: 2.75rem; }
   .ai-site-header__menu .mobile_menu_bar { border: 1px solid var(--ai-border); border-radius: 999px; color: var(--ai-navy); cursor: pointer; }
-  .ai-site-header__menu .mobile_menu_bar::before { align-items: center; color: oklch(30.12% 0.0562 276.88) !important; content: "\2630" !important; display: flex; font-family: Arial, sans-serif !important; font-size: 1.5rem; height: 2.75rem; justify-content: center; line-height: 1; position: static; width: 2.75rem; }
-  .ai-site-header__menu .mobile_nav.opened .mobile_menu_bar::before { content: "\00d7" !important; font-size: 2.25rem; }
+  .ai-site-header__menu .mobile_menu_bar::before { background: var(--ai-navy); content: "" !important; display: block; height: 1.5rem; left: 50%; -webkit-mask: url("../icons/menu.svg") center / contain no-repeat; mask: url("../icons/menu.svg") center / contain no-repeat; position: absolute; top: 50%; transform: translate(-50%, -50%); width: 1.5rem; }
+  .ai-site-header__menu .mobile_nav.opened .mobile_menu_bar::before { -webkit-mask-image: url("../icons/x.svg"); mask-image: url("../icons/x.svg"); }
   .ai-site-header__menu .et_mobile_menu { background: var(--ai-cream); border: 0; bottom: 0; box-shadow: none; left: 0; max-height: none; overflow-y: auto; padding: 1rem var(--ai-gutter) 2rem; position: fixed; right: 0; top: 5rem; width: 100vw; }
   .ai-site-header__menu .et_mobile_menu a { color: var(--ai-navy); font-size: .9rem; font-weight: 750; padding: .75rem .25rem; }
   .ai-global-cta__row, .ai-site-footer__bottom { flex-wrap: wrap !important; }
   .ai-global-cta__content, .ai-global-cta__actions, .ai-site-footer__bottom > .ai-column { flex-basis: 100% !important; width: 100% !important; }
   .ai-site-footer__secondary { grid-template-columns: 1fr; }
   .ai-global-cta__actions, .ai-site-footer__policy-links { text-align: left; }
+  .ai-footer-newsletter__controls .wpcf7-spinner { right: 0; top: 52px; }
   .ai-header-primary__donate.et_pb_button { transform: translate(-53.28125px, .515625px); }
 }
 
